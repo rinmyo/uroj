@@ -9,3 +9,17 @@ edition = "2018"
 [dependencies]
 serde="1"
 serde_yaml ="0.8"
+clap = "2.33"
+actix = "0.10"
+actix-codec = "0.3"
+actix-web = "3"
+actix-web-actors = "3"
+actix-files = "0.5"
+uuid = {version = "0.8", features = ["serde", "v4"]}
+dotenv = "0.15.0"
+tokio = { version = "1", features = ["full"] }
+diesel = { version = "1", features = ["postgres", "r2d2", "chrono"] }
+jsonwebtoken = "7"
+bcrypt = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+csrf = "*"
