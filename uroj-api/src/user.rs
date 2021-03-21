@@ -1,0 +1,7 @@
+struct NewUserData {
+
+}
+
+struct UserData {
+    
+}
