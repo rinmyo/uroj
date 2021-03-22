@@ -1,4 +1,5 @@
-use crate::models::station::*;
+use crate::db::models::station::*;
+
 use actix_web::{
     delete, get, post,
     web::{Json, Path},

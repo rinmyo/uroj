@@ -1,6 +1,6 @@
-use actix_web::web;
+use actix_web::{HttpResponse, web};
 
-use crate::PgPool;
+use crate::{PgPool, db::db_pool::PgPooledConnection};
 
 pub mod index;
 pub mod app;

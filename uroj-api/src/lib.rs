@@ -3,7 +3,7 @@ extern crate diesel;
 
 pub mod api;
 pub mod db;
-pub mod routes;
+pub mod handlers;
 
 use db::db_pool::{init_pool, PgPool};
 

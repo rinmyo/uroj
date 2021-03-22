@@ -2433,11 +2433,12 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tokio 1.3.0",
+ "uroj-protocol",
  "uuid",
 ]
 
 [[package]]
-name = "uroj-common"
+name = "uroj-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -2451,7 +2452,7 @@ dependencies = [
  "chrono",
  "petgraph",
  "tokio 1.3.0",
- "uroj-common",
+ "uroj-protocol",
 ]
 
 [[package]]

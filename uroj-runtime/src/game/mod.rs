@@ -5,18 +5,21 @@ use std::collections::HashMap;
 
 use chrono::{prelude::*, Duration};
 use petgraph::graph::{DiGraph, UnGraph};
-use uroj_common::station::NewInstanceRequest;
+use uroj_protocol::station::NewInstanceRequest;
 
 use self::{components::{Route, Signal, Track, TrackNode, Train}, user::User};
 
-trait InstanceData {}
 
-struct Instance<'a, T: InstanceData> {
+trait Executor {
+    fn new(config: T) -> Self;
+}
+
+struct InstanceBase<'a> {
     instance_id: String,
     start_time: Utc,
+    state: GameState,
     white_list: Vec<User>,
     logger: Option<GameLogger>,
-    instance_data: T,
     nodes: HashMap<String, TrackNode>,
     r_graph: DiGraph<&'a TrackNode, ()>,
     s_graph: UnGraph<&'a TrackNode, ()>,
@@ -32,14 +35,17 @@ impl<T: InstanceData> Instance<'_, T> {
     }
 }
 
-struct ExamData {
+struct Exam {
+    instance: InstanceBase,
     exam_id: String,
     duration: Duration,
 }
 
-impl InstanceData for ExamData {}
+struct ChainData {
+    
+}
 
-struct ChainData {}
+struct ExcerciseData {}
 
 struct GameLogger {}
 

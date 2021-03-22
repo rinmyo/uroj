@@ -6,4 +6,5 @@ mod tests {
     }
 }
 
+pub mod instance;
 pub mod station;

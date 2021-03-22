@@ -1,5 +1,1 @@
-mod game;
-
-fn main() {
-    let (tx, rx) = mpsc::channel();
-}
+use uroj_runtime::run;

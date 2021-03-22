@@ -4,3 +4,5 @@ pub mod state;
 pub mod station;
 pub mod user;
 pub mod class;
+pub mod node;
+pub mod signal;

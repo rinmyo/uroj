@@ -1,5 +1,5 @@
 [package]
-name = "uroj-common"
+name = "uroj-protocol"
 version = "0.1.0"
 authors = ["satanya"]
 edition = "2018"
