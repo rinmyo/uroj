@@ -1,19 +1,81 @@
-pub mod user;
-
 use std::str::FromStr;
 
-use async_graphql::{
-    async_trait, guard::Guard, Context, EmptySubscription, Object, Result, Schema,
-};
+use async_graphql::validators::Email;
+use async_graphql::{guard::Guard, *};
+
+use serde::{Deserialize, Serialize};
 
 use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::Utc;
-use uroj_common::utils::{create_token, Claims, Role as AuthRole};
-use uroj_db::{
-    get_conn_from_ctx,
-    models::user::{NewUser as NewUserData, User as UserData},
-};
-use user::*;
+use strum_macros::*;
+use uroj_common::utils::{create_token, Role as AuthRole};
+use uroj_db::models::user::{NewUser as NewUserData, User as UserData};
+
+use crate::{get_conn_from_ctx, get_role_from_ctx, get_username_from_ctx};
+
+#[derive(SimpleObject)]
+pub(crate) struct User {
+    id: i32,
+    username: String,
+    email: String,
+    role: Role,
+    is_active: bool,
+}
+
+impl From<&UserData> for User {
+    fn from(user: &UserData) -> Self {
+        User {
+            username: user.username.clone(),
+            role: Role::from_str(&user.user_role)
+                .expect(&format!("cannot convert {} to Role", &user.user_role)),
+            id: user.id,
+            email: user.email.clone(),
+            is_active: user.is_active,
+        }
+    }
+}
+
+#[derive(InputObject)]
+pub(crate) struct UserInput {
+    pub(crate) username: String,
+    #[graphql(validator(Email))]
+    pub(crate) email: String,
+    pub(crate) class_id: Option<i32>,
+    pub(crate) password: String,
+    pub(crate) role: Role,
+}
+
+#[derive(InputObject)]
+pub(crate) struct BanUserInput {
+    pub(crate) id: i32,
+}
+
+#[derive(InputObject)]
+pub(crate) struct SignUpInput {
+    pub(crate) username: String,
+    #[graphql(validator(Email))]
+    pub(crate) email: String,
+    pub(crate) password: String,
+}
+
+#[derive(InputObject)]
+pub(crate) struct SignInInput {
+    pub(crate) username: String,
+    pub(crate) password: String,
+}
+
+#[derive(InputObject)]
+pub(crate) struct UpdatePwdInput {
+    pub(crate) old_pwd: String,
+    pub(crate) new_pwd: String,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Enum, Display, EnumString)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum Role {
+    Admin,
+    User,
+}
 
 pub type AppSchema = Schema<Query, Mutation, EmptySubscription>;
 pub struct Query;
@@ -82,7 +144,7 @@ impl Mutation {
         let conn = get_conn_from_ctx(ctx);
         let user = UserData::get_by_username(&input.username, &conn)?;
         if verify(&input.password, &user.hash_pwd)? {
-            if user.is_active {
+            if !user.is_active {
                 return Err("User is not available".into());
             }
             let role = AuthRole::from_str(&user.user_role).expect("Can't convert &str to AuthRole");
@@ -125,13 +187,4 @@ impl Guard for RoleGuard {
             None => Err("Not Login".into()),
         }
     }
-}
-
-pub fn get_username_from_ctx(ctx: &Context<'_>) -> Option<String> {
-    ctx.data_opt::<Claims>().map(|c| c.sub.clone())
-}
-
-pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
-    ctx.data_opt::<Claims>()
-        .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
 }

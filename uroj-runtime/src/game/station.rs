@@ -1,4 +1,5 @@
 use serde::Serialize;
+use uroj_common::station::{Direction, SignalKind, SignalMounting};
 
 #[derive(Debug, Serialize)]
 pub struct NodeData {

@@ -1,12 +1,12 @@
 pub struct QueryRoot;
 
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
-use async_graphql::{async_trait, guard::Guard, Context, Object, Result};
+use async_graphql::{Context, Object, Result, async_trait, dataloader::Loader, guard::Guard};
 use async_graphql::{EmptySubscription, Schema};
 use chrono::Utc;
 use uroj_common::utils::{Claims, Role as AuthRole};
-use uroj_db::get_conn_from_ctx;
+use uroj_db::{connection::PgPool, get_conn_from_ctx};
 use uroj_db::models::class::Class as ClassData;
 use uroj_db::models::station::{NewStation as NewStationData, Station as StationData};
 use uroj_db::models::user::User as UserData;
@@ -127,6 +127,26 @@ fn get_username_from_ctx(ctx: &Context<'_>) -> Option<String> {
 fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
     ctx.data_opt::<Claims>()
         .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
+}
+
+pub struct DetailsLoader {
+    pub pool: Arc<PgPool>,
+}
+
+#[async_trait::async_trait]
+impl Loader<i32> for DetailsLoader {
+    type Value = Details;
+    type Error = Error;
+
+    async fn load(&self, keys: &[i32]) -> Result<HashMap<i32, Self::Value>, Self::Error> {
+        let conn = self.pool.get().expect("Can't get DB connection");
+        let details = repository::get_details(keys, &conn).expect("Can't get planets' details");
+
+        Ok(details
+            .iter()
+            .map(|details_entity| (details_entity.planet_id, Details::from(details_entity)))
+            .collect::<HashMap<_, _>>())
+    }
 }
 
 pub mod class;

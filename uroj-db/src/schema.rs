@@ -21,8 +21,8 @@ table! {
 table! {
     users (id) {
         id -> Int4,
-        hash_pwd -> Varchar,
         username -> Varchar,
+        hash_pwd -> Varchar,
         email -> Text,
         class_id -> Nullable<Int4>,
         user_role -> Varchar,

@@ -7,6 +7,7 @@ use uroj_db::run_migrations;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
+
     let pool = create_connection_pool();
     run_migrations(&pool);
 
