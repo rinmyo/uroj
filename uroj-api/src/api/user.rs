@@ -1,7 +1,0 @@
-struct NewUserData {
-
-}
-
-struct UserData {
-    
-}

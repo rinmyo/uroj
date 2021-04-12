@@ -1,23 +1,21 @@
 [package]
-name = "uroj-api"
+name = "uroj-auth"
 version = "0.1.0"
-authors = ["satanya"]
+authors = ["satanya <admin@sozr.cn>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde="1"
-serde_yaml ="0.8"
+dotenv="0"
 actix-web = "3"
 async-graphql = {version = "2", features = ["chrono", "dataloader"]}
 async-graphql-actix-web = "2" # 如果你需要集成到Actix-web
-uuid = {version = "0.8", features = ["serde", "v4"]}
-dotenv = "0"
-bcrypt = "0.9"
-chrono = { version = "0.4", features = ["serde"] }
-strum = ""
-strum_macros = ""
+serde = "1"
+chrono = { version = "0", features = ["serde"] }
+strum = "0"
+strum_macros = "0"
+bcrypt = "0"
 
 [dependencies.uroj-common]
 path = "../uroj-common"

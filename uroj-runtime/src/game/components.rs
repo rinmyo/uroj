@@ -3,7 +3,7 @@ use std::collections::HashSet;
 pub(crate) struct TrackNode {
     node_id: String,
     state: NodeStatus,
-    used_count: u32, //被征用计数，每次征用则加一，每次作为S扩展集中的点被解除征用则减1，为0则说明未被征用
+    used_count: u32, //被征用计数，每次征用则INC，每次作为S扩展集中的点被解除征用则减1，为0则说明未被征用
     protect_signal_id: String, //防护信号机id
 }
 
@@ -23,7 +23,7 @@ pub(crate) struct Train<'a> {
     curr_node: &'a TrackNode,
 }
 
-pub(crate) type Route<'a> = Vec<&'a TrackNode>;
+pub(crate) type Path<'a> = Vec<&'a TrackNode>;
 
 pub(crate) type Track<'a> = HashSet<&'a TrackNode>;
 

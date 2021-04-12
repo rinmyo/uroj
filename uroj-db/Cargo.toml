@@ -1,0 +1,16 @@
+[package]
+name = "uroj-db"
+version = "0.1.0"
+authors = ["satanya <admin@sozr.cn>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+diesel = { version = "1", features = ["postgres", "r2d2", "chrono"] }
+diesel_migrations ="1"
+dotenv = "0.15.0"
+serde = "1"
+chrono = { version = "0.4", features = ["serde"] }
+async-graphql = "*"
+
