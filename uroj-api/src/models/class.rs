@@ -1,8 +1,9 @@
 use async_graphql::*;
 use uroj_db::{
-    get_conn_from_ctx,
     models::{class::Class as ClassData, user::User as UserData},
 };
+
+use crate::get_conn_from_ctx;
 
 use super::user::User;
 

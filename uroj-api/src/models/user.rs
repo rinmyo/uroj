@@ -10,13 +10,15 @@ use strum_macros::*;
 
 use uroj_db::models::class::Class as ClassData;
 use uroj_db::models::station::Station as StationData;
-use uroj_db::{get_conn_from_ctx, models::user::User as UserData};
+use uroj_db::{models::user::User as UserData};
+
+use crate::get_conn_from_ctx;
 
 use super::{class::Class, station::Station};
 
-#[derive(SimpleObject)]
+#[derive(SimpleObject, Clone)]
 #[graphql(complex)]
-pub(crate) struct User {
+pub struct User {
     id: String,
     email: String,
     class_id: Option<i32>,
@@ -39,7 +41,7 @@ impl User {
     }
 
     async fn stations(&self, ctx: &Context<'_>) -> Vec<Station> {
-        StationData::find_by_author_id(self.id, &get_conn_from_ctx(ctx))
+        StationData::find_by_author_id(&self.id, &get_conn_from_ctx(ctx))
             .expect("cannot query stations")
             .iter()
             .map(|s| s.into())
@@ -53,7 +55,6 @@ impl From<&UserData> for User {
             id: user.id.clone(),
             role: Role::from_str(&user.user_role)
                 .expect(&format!("cannot convert {} to Role", &user.user_role)),
-            id: user.id,
             email: user.email.clone(),
             class_id: user.class_id,
             is_active: user.is_active,

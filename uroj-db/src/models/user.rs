@@ -2,7 +2,7 @@ use super::class::Class;
 use crate::schema::users;
 use crate::schema::users::dsl::*;
 use chrono::prelude::*;
-use diesel::prelude::*;
+use diesel::{dsl::any, prelude::*};
 use diesel::PgConnection;
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +28,10 @@ impl User {
 
     pub fn get(uid: &str, conn: &PgConnection) -> QueryResult<Self> {
         users.find(uid).first(conn)
+    }
+
+    pub fn find_many(ids: &[String], conn: &PgConnection) -> QueryResult<Vec<Self>> {
+        users.filter(id.eq(any(ids))).load(conn)
     }
 
     pub fn get_by_class_id(cid: i32, conn: &PgConnection) -> QueryResult<Vec<Self>> {

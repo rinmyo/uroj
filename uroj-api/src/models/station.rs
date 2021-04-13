@@ -1,8 +1,10 @@
+use crate::get_conn_from_ctx;
+
 use super::user::User;
 use async_graphql::*;
 use chrono::NaiveDateTime;
 use uroj_db::models::station::Station as StationData;
-use uroj_db::{get_conn_from_ctx, models::user::User as UserData};
+use uroj_db::{models::user::User as UserData};
 
 #[derive(SimpleObject)]
 #[graphql(complex)]
@@ -13,15 +15,15 @@ pub(crate) struct Station {
     created: NaiveDateTime,
     updated: NaiveDateTime,
     draft: bool,
-    author_id: Option<i32>,
+    author_id: Option<String>,
     yaml: String,
 }
 
 #[ComplexObject]
 impl Station {
     async fn author(&self, ctx: &Context<'_>) -> Option<User> {
-        self.author_id.map(|uid| {
-            let author = UserData::get(uid, &get_conn_from_ctx(ctx)).expect("cannot query user");
+        self.author_id.clone().map(|uid| {
+            let author = UserData::get(&uid, &get_conn_from_ctx(ctx)).expect("cannot query user");
             (&author).into()
         })
     }
@@ -36,7 +38,7 @@ impl From<&StationData> for Station {
             created: station.created,
             updated: station.updated,
             draft: station.draft,
-            author_id: station.author_id,
+            author_id: station.author_id.clone(),
             yaml: station.yaml.clone(),
         }
     }
