@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize};
 )]
 #[belongs_to(Class)]
 pub struct User {
-    pub id: i32,
-    pub username: String,
+    pub id: String,
     pub hash_pwd: String,
     pub email: String,
     pub class_id: Option<i32>,
@@ -27,11 +26,7 @@ impl User {
         users.load(conn)
     }
 
-    pub fn get_by_username(name: &str, conn: &PgConnection) -> QueryResult<Self> {
-        users.filter(username.eq(name)).first(conn)
-    }
-
-    pub fn get(uid: i32, conn: &PgConnection) -> QueryResult<Self> {
+    pub fn get(uid: &str, conn: &PgConnection) -> QueryResult<Self> {
         users.find(uid).first(conn)
     }
 
@@ -64,7 +59,7 @@ impl User {
 #[derive(Insertable, Serialize, Deserialize, Debug, AsChangeset, Associations)]
 #[table_name = "users"]
 pub struct NewUser {
-    pub username: String,
+    pub id: String,
     pub hash_pwd: String,
     pub email: String,
     pub class_id: Option<i32>,

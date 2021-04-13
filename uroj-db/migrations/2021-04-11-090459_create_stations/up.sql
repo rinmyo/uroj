@@ -6,6 +6,6 @@ CREATE TABLE stations (
     created        timestamp     not null,
     updated        timestamp     not null,
     draft          boolean       not null default 'f',
-    author_id      int           references users(id) on delete set null,
+    author_id      varchar(30)   references users(id) on delete set null,
     yaml           text          not null
 )

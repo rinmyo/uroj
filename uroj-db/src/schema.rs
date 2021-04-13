@@ -13,15 +13,14 @@ table! {
         created -> Timestamp,
         updated -> Timestamp,
         draft -> Bool,
-        author_id -> Nullable<Int4>,
+        author_id -> Nullable<Varchar>,
         yaml -> Text,
     }
 }
 
 table! {
     users (id) {
-        id -> Int4,
-        username -> Varchar,
+        id -> Varchar,
         hash_pwd -> Varchar,
         email -> Text,
         class_id -> Nullable<Int4>,

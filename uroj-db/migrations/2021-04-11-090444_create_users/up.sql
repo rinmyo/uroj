@@ -1,7 +1,6 @@
 -- Your SQL goes here
 CREATE TABLE users (
-    id          serial          primary key,
-    username    varchar(20)     unique not null,
+    id    varchar(30)     primary key,
     hash_pwd    varchar(60)     not null,
     email       text            unique not null,
     class_id    int             references classes(id) on delete set null,

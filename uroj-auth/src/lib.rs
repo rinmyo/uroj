@@ -26,7 +26,7 @@ pub fn get_conn_from_ctx(ctx: &Context<'_>) -> Conn {
         .expect("Can't get DB connection")
 }
 
-pub fn get_username_from_ctx(ctx: &Context<'_>) -> Option<String> {
+pub fn get_id_from_ctx(ctx: &Context<'_>) -> Option<String> {
     ctx.data_opt::<Claims>().map(|c| c.sub.clone())
 }
 

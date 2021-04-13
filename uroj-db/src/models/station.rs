@@ -14,7 +14,7 @@ pub struct Station {
     pub created: NaiveDateTime,
     pub updated: NaiveDateTime,
     pub draft: bool,
-    pub author_id: Option<i32>,
+    pub author_id: Option<String>,
     pub yaml: String,
 }
 
@@ -27,7 +27,7 @@ impl Station {
         stations.filter(title.eq(ttl)).first(conn)
     }
 
-    pub fn find_by_author_id(aid: i32, conn: &PgConnection) -> QueryResult<Vec<Self>> {
+    pub fn find_by_author_id(aid: &str, conn: &PgConnection) -> QueryResult<Vec<Self>> {
         stations.filter(author_id.eq(aid)).load(conn)
     }
 }
@@ -40,7 +40,7 @@ pub struct NewStation {
     pub created: NaiveDateTime,
     pub updated: NaiveDateTime,
     pub draft: bool,
-    pub author_id: Option<i32>,
+    pub author_id: Option<String>,
     pub yaml: String,
 }
 

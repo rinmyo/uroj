@@ -17,8 +17,7 @@ use super::{class::Class, station::Station};
 #[derive(SimpleObject)]
 #[graphql(complex)]
 pub(crate) struct User {
-    id: i32,
-    username: String,
+    id: String,
     email: String,
     class_id: Option<i32>,
     role: Role,
@@ -51,7 +50,7 @@ impl User {
 impl From<&UserData> for User {
     fn from(user: &UserData) -> Self {
         User {
-            username: user.username.clone(),
+            id: user.id.clone(),
             role: Role::from_str(&user.user_role)
                 .expect(&format!("cannot convert {} to Role", &user.user_role)),
             id: user.id,
