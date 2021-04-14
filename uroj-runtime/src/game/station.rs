@@ -1,9 +1,11 @@
 use serde::Serialize;
 use uroj_common::station::{Direction, SignalKind, SignalMounting};
 
+//ここからフロントエンドに発送するため、すべてのデータが必要なんだ
+
 #[derive(Debug, Serialize)]
 pub struct NodeData {
-    pub node_id: i32,
+    pub node_id: usize,
     pub track_id: String,
     pub line: ((f64, f64), (f64, f64)), //綫段，用於渲染
     pub joint: (String, String),        //兩端是否有絕緣節，用於渲染
@@ -19,6 +21,7 @@ pub struct SignalData {
     pub protect_node_id: i32,    //防护node 的 ID
 }
 
+// all data needed to create a new instance 
 #[derive(Debug, Serialize)]
 pub struct StationData {
     pub station_name: String,

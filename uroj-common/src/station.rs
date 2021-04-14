@@ -56,6 +56,7 @@ pub struct Node {
     pub conflicted_nodes: Vec<i32>, //牴觸節點, 用於構建 S 關係
     pub line: ((f64, f64), (f64, f64)), //綫段，用於渲染
     pub joint: (JointKind, JointKind), //兩端是否有絕緣節，用於渲染
+    pub default_end_btn_sgn: Option<usize>, //缺省別名終端信號機，若非空則説明其值為該終端信號機
 }
 
 pub struct NewInstanceRequest {

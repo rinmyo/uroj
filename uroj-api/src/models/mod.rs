@@ -83,6 +83,10 @@ impl Mutation {
         let created_station = &new_station.create(&conn)?;
         Ok(created_station.into())
     }
+
+    // async fn create_exam_instance(&self, ctx: &Context<'_>, input: NewInstanceInput) -> Result<String> {}
+
+    // async fn create_train_instance(&self, ctx: &Context<'_>, input: NewTrainInput) -> Result {}
 }
 
 pub(crate) struct RoleGuard {
