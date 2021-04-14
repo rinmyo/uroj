@@ -10,6 +10,8 @@ pub(crate) struct TrackNode {
     pub(crate) node_id: NodeId,
     pub(crate) used_count: u32, //被征用计数，每次征用则INC，每次作为S扩展集中的点被解除征用则减1，为0则说明未被征用
     pub(crate) state: NodeStatus,
+    pub(crate) is_lock: bool,
+    pub(crate) once_occ: bool,
 }
 
 impl From<&NodeData> for TrackNode {
@@ -18,6 +20,8 @@ impl From<&NodeData> for TrackNode {
             node_id: data.node_id,
             used_count: 0,
             state: Default::default(),
+            is_lock: false,
+            once_occ: false,
         }
     }
 }
@@ -27,9 +31,7 @@ impl From<&NodeData> for TrackNode {
 // 在毕业设计中使用状态转移图，可以凑字数
 #[derive(Eq, PartialEq)]
 pub(crate) enum NodeStatus {
-    Lock,         //锁闭, 白，锁闭的前提条件是未被锁闭 未被征用
     Occupied,     //占用，赤
-    OnceOcc,      //曾占用, 赤
     Unexpected,   //异常，条
     Vacant,       //空闲，蓝
 }

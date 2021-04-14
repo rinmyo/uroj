@@ -92,6 +92,9 @@ impl Instance {
         for id in maybe_path {
             let node = self.fsm.nodes.get(&id).expect("invalid node id");
             if node.state != NodeStatus::Vacant {
+                return Err("target path is not vacant".into());
+            }
+            if node.is_lock {
                 return Err("target path is conflicting".into());
             }
             if node.used_count > 0 {
@@ -100,39 +103,35 @@ impl Instance {
         }
         //為保證進路建立的原子性
         maybe_path.iter().for_each(|id| {
-            self.fsm.nodes[id].state = NodeStatus::Lock;
+            self.fsm.nodes[id].is_lock = true;
+            self.fsm.nodes[id].once_occ = false; //重置曾占用flag
             self.graph.s_graph.neighbors(*id).for_each(|id| {
                 self.fsm.nodes[&id].used_count += 1;
             })
         });
 
-        self.paths.insert(maybe_path);
-
         Ok(maybe_path)
     }
 
     fn handle_train_movement(&self, from: NodeId, to: NodeId) {
+        self.fsm.nodes[&from].state = NodeStatus::Vacant;
         self.fsm.nodes[&to].state = NodeStatus::Occupied;
-        for path in self.paths {
-            if path.contains(&from) {
-                self.fsm.nodes[&from].state = NodeStatus::OnceOcc;
-                return;
-            }
-        }
-        self.fsm.nodes[&to].state = NodeStatus::Vacant;
+        self.fsm.nodes[&from].once_occ = true;
     }
 
     //calling when train move to new node
-    fn update(&self, event: Event) {
+    fn update(&self) {
         let nodes = self.fsm.nodes;
-
-        for (i, j) in ids.iter().enumerate() {
-            if nodes[&ids[i - 1]].state == NodeStatus::Vacant
-                && nodes[j].state == NodeStatus::OnceOcc
-                && nodes[&ids[i + 1]].state == NodeStatus::Occupied
-            {
-                // delay 3 sec, at p38 of textbook
-                nodes[j].state = NodeStatus::Vacant
+        for ids in self.paths {
+            for (i, j) in ids.iter().enumerate() {
+                if nodes[j].once_occ
+                    && nodes[j].state == NodeStatus::Vacant
+                    && nodes[&ids[i + 1]].state == NodeStatus::Occupied
+                    && (i == 0 || nodes[&ids[i - 1]].state == NodeStatus::Vacant)
+                {
+                    // delay 3 sec, at p38 of textbook
+                    nodes[j].is_lock = false;
+                }
             }
         }
     }
