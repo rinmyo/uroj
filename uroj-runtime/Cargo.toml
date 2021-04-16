@@ -9,9 +9,17 @@ edition = "2018"
 [dependencies]
 chrono = "0.4"
 tokio = { version = "1", features = ["full"] }
+tokio-serde = { version = "0.8", features = ["json"] }
+tarpc = { version = "0.26", features = ["full"] }
 petgraph = "*"
 serde="1"
 actix-web = "3"
+async-graphql = {version = "2", features = ["chrono", "dataloader"]}
+async-graphql-actix-web = "2" # 如果你需要集成到Actix-web
+async-stream = "0"
+strum = "0"
+strum_macros = "0"
+futures = "0"
 
 [dependencies.uroj-common]
 path = "../uroj-common"

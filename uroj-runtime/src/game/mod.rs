@@ -1,4 +1,4 @@
 pub mod components;
 pub mod station;
 pub mod instance;
-pub mod exam;
+pub mod event;
