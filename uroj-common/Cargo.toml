@@ -15,4 +15,3 @@ lazy_static = "1"
 strum = "0"
 strum_macros = "0"
 tokio-serde = { version = "0.8", features = ["json"] }
-tarpc = { version = "0.26", features = ["full"] }

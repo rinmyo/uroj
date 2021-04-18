@@ -6,12 +6,26 @@ table! {
 }
 
 table! {
+    instance_configs (id) {
+        id -> Int4,
+        title -> Varchar,
+        description -> Nullable<Text>,
+        created_at -> Timestamp,
+        creator -> Nullable<Varchar>,
+        player -> Nullable<Varchar>,
+        yaml -> Text,
+        begin_at -> Timestamp,
+        token -> Nullable<Uuid>,
+    }
+}
+
+table! {
     stations (id) {
         id -> Int4,
         title -> Varchar,
         description -> Nullable<Text>,
-        created -> Timestamp,
-        updated -> Timestamp,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
         draft -> Bool,
         author_id -> Nullable<Varchar>,
         yaml -> Text,
@@ -26,8 +40,8 @@ table! {
         class_id -> Nullable<Int4>,
         user_role -> Varchar,
         is_active -> Bool,
-        date_joined -> Timestamp,
-        last_login -> Nullable<Timestamp>,
+        joined_at -> Timestamp,
+        last_login_at -> Nullable<Timestamp>,
     }
 }
 
@@ -36,6 +50,7 @@ joinable!(users -> classes (class_id));
 
 allow_tables_to_appear_in_same_query!(
     classes,
+    instance_configs,
     stations,
     users,
 );

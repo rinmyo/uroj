@@ -58,8 +58,8 @@ impl From<&UserData> for User {
             email: user.email.clone(),
             class_id: user.class_id,
             is_active: user.is_active,
-            date_joined: user.date_joined,
-            last_login: user.last_login,
+            date_joined: user.joined_at,
+            last_login: user.last_login_at,
         }
     }
 }

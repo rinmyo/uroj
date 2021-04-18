@@ -20,6 +20,7 @@ async-stream = "0"
 strum = "0"
 strum_macros = "0"
 futures = "0"
+redis = { version = "0", features = ["tokio-comp"] }
 
 [dependencies.uroj-common]
 path = "../uroj-common"

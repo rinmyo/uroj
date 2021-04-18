@@ -7,5 +7,3 @@ mod tests {
 }
 
 pub mod utils;
-pub mod station;
-pub mod rpc;

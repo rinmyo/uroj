@@ -104,8 +104,6 @@ impl Mutation {
             email: input.email,
             class_id: input.class_id,
             user_role: input.role.to_string(),
-            is_active: true,
-            date_joined: Utc::now().naive_utc(),
         };
 
         let created_user = &new_user.create(&get_conn_from_ctx(ctx))?;
@@ -129,8 +127,6 @@ impl Mutation {
             email: input.email,
             class_id: None,
             user_role: Role::User.to_string(),
-            is_active: true,
-            date_joined: Utc::now().naive_utc(),
         };
 
         let created_user = &new_user.create(&get_conn_from_ctx(ctx))?;

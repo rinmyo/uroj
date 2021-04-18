@@ -7,27 +7,24 @@ use strum_macros::*;
 use async_graphql::Enum;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
-use uroj_common::station::{Direction, Signal as StaticSignal, Node as StaticNode, SignalKind};
+use uroj_common::rpc::{Node as StaticNode, Signal as StaticSignal, SignalKind};
 
-use super::{
-    event::TrainMoveEvent,
-    instance::Instance,
-};
+use super::{event::TrainMoveEvent, instance::Instance};
 
 use tokio::time::{sleep, Duration};
 
 pub(crate) type NodeID = usize;
 //Node 狀態機，沒有耦合信息
-pub(crate) struct TrackNode {
+pub(crate) struct Node {
     pub(crate) node_id: NodeID,
     pub(crate) used_count: u32, //被征用计数，每次征用则INC，每次作为S扩展集中的点被解除征用则减1，为0则说明未被征用
     pub(crate) state: NodeStatus,
     pub(crate) is_lock: bool,
     pub(crate) once_occ: bool,
-    pub(crate) pro_sgn_id: Option<String>,
+    pub(crate) pro_sgn_id: (Option<String>, Option<String>), //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
 }
 
-impl TrackNode {
+impl Node {
     pub(crate) async fn unlock(&mut self) {
         sleep(Duration::from_secs(3)).await;
         self.is_lock = false;
@@ -38,15 +35,15 @@ impl TrackNode {
     }
 }
 
-impl From<&StaticNode> for TrackNode {
+impl From<&StaticNode> for Node {
     fn from(data: &StaticNode) -> Self {
-        TrackNode {
+        Node {
             node_id: data.node_id,
             used_count: 0,
             state: Default::default(),
             is_lock: false,
             once_occ: false,
-            pro_sgn_id: None,
+            pro_sgn_id: (None, None),
         }
     }
 }
@@ -67,41 +64,32 @@ impl Default for NodeStatus {
     }
 }
 
-pub(crate) type Path<'a> = Vec<&'a TrackNode>;
-
-pub(crate) type Track<'a> = HashSet<&'a TrackNode>;
 
 pub(crate) struct Signal {
-    signal_id: String,
-    filament_status: (FilamentStatus, FilamentStatus),
-    state: SignalStatus,
-    used_flag: bool, //征用
-    pub(crate) pro_node_id: NodeID,
-    kind: SignalKind,
-    pub(crate) dir: Direction
+    pub(crate) signal_id: String,
+    pub(crate) filament_status: (FilamentStatus, FilamentStatus),
+    pub(crate) state: SignalStatus,
+    pub(crate) used_flag: bool, //征用
 }
 
 impl From<&StaticSignal> for Signal {
     fn from(data: &StaticSignal) -> Self {
-        let filament_status = match data.sgn_type {
+        let filament_status = match data.sig_type {
             //调车信号机只有一个灯丝
             SignalKind::ShuntingSignal => (Default::default(), FilamentStatus::None),
             _ => (Default::default(), Default::default()),
         };
 
-        let state = match data.sgn_type {
+        let state = match data.sig_type {
             SignalKind::ShuntingSignal => SignalStatus::A,
             _ => SignalStatus::H,
         };
 
         Signal {
-            signal_id: data.signal_id,
+            signal_id: data.id,
             filament_status: filament_status,
             state: state,
             used_flag: false,
-            pro_node_id: data.protect_node_id,
-            kind: data.sgn_type,
-            dir: data.dir
         }
     }
 }
@@ -215,7 +203,7 @@ impl Train {
         self.past_node.push(target.clone());
 
         //三點檢查
-        if  {}
+        // if  {}
         sleep(Duration::from_secs(3)).await;
     }
 
@@ -223,9 +211,10 @@ impl Train {
     pub(crate) fn try_move_to(&self, target: &NodeID, ins: &Instance) -> Option<TrainMoveEvent> {
         if self.can_move_to(target, ins) {
             return Some(TrainMoveEvent {
-                from: curr.clone(),
+                from: self.curr_node(),
                 to: target.clone(),
             });
         }
+        None
     }
 }

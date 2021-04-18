@@ -1,4 +1,8 @@
-use std::{net::{IpAddr, Ipv6Addr}, str::FromStr, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv6Addr},
+    str::FromStr,
+    sync::Arc,
+};
 
 use actix_web::{guard, web};
 use async_graphql::{Context, Schema};
@@ -6,6 +10,7 @@ use futures::{future, prelude::*};
 use game::instance::{Instance, InstancePool};
 use models::{Mutation, Query, Subscription};
 use tarpc::server::{self, Channel, Incoming};
+use tokio_serde::formats::Json;
 use uroj_common::utils::{Claims, Role as AuthRole};
 
 pub fn configure_service(cfg: &mut web::ServiceConfig) {
@@ -29,8 +34,10 @@ pub fn create_schema_with_context(pool: InstancePool) -> Schema<Query, Mutation,
         .finish()
 }
 
-pub fn get_id_from_ctx(ctx: &Context<'_>) -> Option<String> {
-    ctx.data_opt::<Claims>().map(|c| c.sub.clone())
+pub fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
+    ctx.data_opt::<Claims>()
+        .map(|c| c.sub.clone())
+        .ok_or("not found login user")
 }
 
 pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
@@ -38,8 +45,13 @@ pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
         .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
 }
 
-pub fn borrow_instance_from_ctx<'ctx>(ctx: &Context<'ctx>, id: &str) -> Option<&'ctx Instance> {
-    ctx.data_unchecked::<Arc<InstancePool>>().get(id)
+pub fn borrow_instance_from_ctx<'ctx>(
+    ctx: &Context<'ctx>,
+    id: &str,
+) -> Result<&'ctx Instance, String> {
+    ctx.data_unchecked::<Arc<InstancePool>>()
+        .get(id)
+        .ok_or("not found available instance".into())
 }
 
 async fn run_rpc_server(port: u16) {
@@ -54,7 +66,6 @@ async fn run_rpc_server(port: u16) {
         .map(server::BaseChannel::with_defaults)
         // Limit channels to 1 per IP.
         .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
-
         .map(|channel| {
             let server = HelloServer(channel.transport().peer_addr().unwrap());
             channel.execute(server.serve())

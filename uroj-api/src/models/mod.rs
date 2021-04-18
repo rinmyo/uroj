@@ -4,7 +4,6 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_graphql::{async_trait, dataloader::Loader, guard::Guard, Context, Object, Result};
 use async_graphql::{EmptySubscription, Error, Schema};
-use chrono::Utc;
 use uroj_common::utils::{Claims, Role as AuthRole};
 use uroj_db::connection::PgPool;
 use uroj_db::models::class::Class as ClassData;
@@ -73,8 +72,6 @@ impl Mutation {
         let new_station = NewStationData {
             title: input.title,
             description: input.description,
-            created: Utc::now().naive_utc(),
-            updated: Utc::now().naive_utc(),
             draft: input.draft,
             author_id: Some(user.id),
             yaml: input.yaml,

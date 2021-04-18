@@ -9,51 +9,83 @@ use petgraph::{
     algo,
     graphmap::{DiGraphMap, UnGraphMap},
 };
-use uroj_common::station::Direction;
 
-use super::{components::{Path, Train}};
 use tokio::time::sleep;
 
-use super::components::{NodeID, NodeStatus, Signal, TrackNode};
+use super::components::{Node, NodeID, NodeStatus, Signal, Train};
 
 // 進路になる必要な条件：
 // １．r_graphの点でできるパースのこと
 // 2. パースの点たちは相互にS関係がないこと
 // 3. パースの点はLOCKでもUSEでもいけないこと
 
+#[derive(Clone)]
+enum Direction {
+    Left,
+    Right,
+    End,
+}
+
 //站場圖
 pub(crate) struct StationGraph {
     r_graph: DiGraphMap<NodeID, Direction>,
     s_graph: UnGraphMap<NodeID, ()>,
-    b_graph: UnGraphMap<NodeID, ()>,
+    // b_graph: UnGraphMap<NodeID, ()>,
 }
 
 impl StationGraph {
+    fn new(data: Vec<StaticNode>) -> StationGraph {
+        let r_graph = DiGraphMap::new();
+        let s_graph = UnGraphMap::new();
+        // let b_graph= UnGraphMap::new();
 
-    fn new(data: Vec<&NodeData>) -> StationGraph {
-        
+        data.iter().for_each(|n| {
+            for i in n.left_adj {
+                r_graph.add_edge(n.node_id, i, Direction::Left);
+            }
+            for i in n.right_adj {
+                r_graph.add_edge(n.node_id, i, Direction::Right);
+            }
+            for i in n.conflicted_nodes {
+                s_graph.add_edge(n.node_id, i, ());
+            }
+        });
+
+        StationGraph {
+            r_graph: r_graph,
+            s_graph: s_graph,
+            // b_graph: b_graph,
+        }
     }
 
     //可能な進路を探す
-    fn available_path(&self, start: NodeID, goal: NodeID, dir: &Direction) -> Option<Vec<NodeID>> {
+    fn available_path(
+        &self,
+        start: NodeID,
+        goal: NodeID,
+        dir: &Direction,
+    ) -> Option<(Vec<(NodeID, Direction)>)> {
         if start == goal {
             return None;
         }
-        let path = algo::astar(&self.r_graph, start, |node| node == goal, |_| 1, |_| 0)
+        let maybe_path = algo::astar(&self.r_graph, start, |node| node == goal, |_| 1, |_| 0)
             .map(|(_, path)| path)?;
         //pathはS関係に違反すると、必ず有効な進路じゃないということになる
-        for (i, &j) in path.iter().enumerate() {
-            for k in i + 1..path.len() {
-                if self.s_graph.contains_edge(j, path[k]) {
+        let mut route: Vec<(NodeID, Direction)>;
+        for (i, &j) in maybe_path.iter().enumerate() {
+            for k in i + 1..maybe_path.len() {
+                if self.s_graph.contains_edge(j, maybe_path[k]) {
                     return None;
                 }
             }
+            let dir = if i < maybe_path.len() {
+                self.r_graph.edge_weight(j, maybe_path[i + 1])?.clone()
+            } else {
+                Direction::End
+            };
+            route.push((j, dir));
         }
-        //見つけたパースの方向を確認する
-        if self.r_graph.edge_weight(path[0], path[1])? != dir {
-            return None;
-        }
-        Some(path)
+        Some(route)
     }
 
     pub(crate) fn is_adjacent(&self, from: &NodeID, to: &NodeID) -> bool {
@@ -61,27 +93,26 @@ impl StationGraph {
     }
 }
 
+struct Route {
+    path: Vec<NodeID>,
+    dir: Direction,
+}
+
 //實例狀態機
 pub(crate) struct InstanceFSM {
     sgns: HashMap<String, Signal>,
-    nodes: HashMap<NodeID, TrackNode>,
+    nodes: HashMap<NodeID, Node>,
 }
 
 impl InstanceFSM {
-    fn new(data: StationData) -> InstanceFSM {
-        let sgns_iter = data
-            .signals
-            .iter()
-            .map(|data| (data.into(), data.signal_id, data.protect_node_id));
-        let sgns = sgns_iter.map(|(sgn, id, _)| (id, sgn)).collect();
-        let protect_table = sgns_iter
-            .map(|(_, sgn_id, node_id)| (node_id, sgn_id))
-            .collect::<HashMap<_, _>>();
-        let nodes = data
-            .nodes
+    fn new(sgn_vec: Vec<StaticSignal>, node_vec: Vec<StaticNode>) -> InstanceFSM {
+        let sgns = sgn_vec.iter().map(|s| (s.id, s.into())).collect();
+        let protect_table: HashMap<_, _> =
+            sgn_vec.iter().map(|s| (s.protect_node_id, s.id)).collect();
+        let nodes = node_vec
             .iter()
             .map(|n| {
-                let mut n: TrackNode = n.into();
+                let mut n: Node = n.into();
                 n.pro_sgn_id = protect_table.get(&n.node_id).map(|sid| sid.clone());
                 (n.node_id, n)
             })
@@ -92,15 +123,15 @@ impl InstanceFSM {
         }
     }
 
-    pub(crate) fn node_mut(&self, id: &NodeID) -> &mut TrackNode {
+    pub(crate) fn node_mut(&self, id: &NodeID) -> &mut Node {
         &mut self.nodes[id]
     }
 
-    pub(crate) fn node(&self, id: &NodeID) -> &TrackNode {
+    pub(crate) fn node(&self, id: &NodeID) -> &Node {
         &self.nodes[id]
     }
 
-    fn shared_node(&self, id: &NodeID) -> Arc<Mutex<TrackNode>> {
+    fn shared_node(&self, id: &NodeID) -> Arc<Mutex<Node>> {
         Mutex::new(self.nodes[id]).into()
     }
 
@@ -113,16 +144,34 @@ pub(crate) struct Instance {
     pub(crate) fsm: InstanceFSM,
     pub(crate) graph: StationGraph,
     trains: Vec<Train>,
-    //若某個信號機作爲終端信號機被點擊，則其可能防護的是差置信號機所實際防護的node
-    alias_end: HashMap<String, NodeID>,
+    whitelist: HashMap<String, GamerRole>,
+    state: InstanceState,
 }
 
 impl Instance {
+    pub(crate) fn new(req: &NewInstanceRequest) -> Self {
+        let fsm = InstanceFSM::new(req.signals, req.nodes);
+        let graph = StationGraph::new(req.nodes);
+        Instance {
+            fsm: fsm,
+            graph: graph,
+            trains: Vec::new(),
+            whitelist: req.whitelist,
+        }
+    }
+
+    pub(crate) fn user_role(&self, id: &str) -> Option<GamerRole> {
+        self.whitelist.get(id).map(|role| role.clone())
+    }
+
     //パースを作成する
-    fn create_path(&self, start_sgn_id: &str, end_sgn_id: &str) -> Result<Vec<NodeID>, String> {
+    pub(crate) fn create_path(
+        &self,
+        start_btn_id: &str,
+        end_btn_id: &str,
+    ) -> Result<Vec<NodeID>, String> {
         let fsm = &self.fsm;
         let graph = &self.graph;
-        let alias_end = &self.alias_end;
 
         let start = fsm
             .sgns
@@ -132,10 +181,12 @@ impl Instance {
             .get(end_sgn_id)
             .or_else(|| fsm.sgns.get(end_sgn_id).map(|s| &s.pro_node_id))
             .ok_or(format!("unknown signal id: {}", start_sgn_id))?;
-        let maybe_path = self
+        let (maybe_path, dir) = self
             .graph
             .available_path(start.pro_node_id, goal, &start.dir)
             .ok_or("no available path exists")?;
+
+        // if dir !=  {}
 
         //ensure that all nodes are not used or locked by another existing path
         for id in maybe_path {
@@ -175,14 +226,15 @@ impl Instance {
 pub(crate) type InstancePool = HashMap<String, Instance>;
 type TrainID = usize;
 
-enum GameState {
-    GamePlay,
+enum InstanceState {
+    Uninitialized,
+    Playing,
     Pause,
     Result,
 }
 
-impl Default for GameState {
+impl Default for InstanceState {
     fn default() -> Self {
-        GameState::Pause
+        InstanceState::Uninitialized
     }
 }

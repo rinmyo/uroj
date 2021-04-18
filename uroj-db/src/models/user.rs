@@ -17,8 +17,8 @@ pub struct User {
     pub class_id: Option<i32>,
     pub user_role: String,
     pub is_active: bool,
-    pub date_joined: NaiveDateTime,
-    pub last_login: Option<NaiveDateTime>,
+    pub joined_at: NaiveDateTime,
+    pub last_login_at: Option<NaiveDateTime>,
 }
 
 impl User {
@@ -54,7 +54,7 @@ impl User {
 
     pub fn update_last_login(&self, time: NaiveDateTime, conn: &PgConnection) -> QueryResult<()> {
         diesel::update(self)
-            .set(last_login.eq(time))
+            .set(last_login_at.eq(time))
             .execute(conn)?;
         Ok(())
     }
@@ -68,8 +68,6 @@ pub struct NewUser {
     pub email: String,
     pub class_id: Option<i32>,
     pub user_role: String,
-    pub is_active: bool,
-    pub date_joined: NaiveDateTime,
 }
 
 impl NewUser {
