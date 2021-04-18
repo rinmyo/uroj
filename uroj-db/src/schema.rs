@@ -6,7 +6,15 @@ table! {
 }
 
 table! {
-    instance_configs (id) {
+    executors (id) {
+        id -> Int4,
+        host -> Varchar,
+        port -> Int4,
+    }
+}
+
+table! {
+    instances (id) {
         id -> Int4,
         title -> Varchar,
         description -> Nullable<Text>,
@@ -14,8 +22,10 @@ table! {
         creator -> Nullable<Varchar>,
         player -> Nullable<Varchar>,
         yaml -> Text,
+        curr_state -> Varchar,
         begin_at -> Timestamp,
         token -> Nullable<Uuid>,
+        executor_id -> Int4,
     }
 }
 
@@ -45,12 +55,14 @@ table! {
     }
 }
 
+joinable!(instances -> executors (executor_id));
 joinable!(stations -> users (author_id));
 joinable!(users -> classes (class_id));
 
 allow_tables_to_appear_in_same_query!(
     classes,
-    instance_configs,
+    executors,
+    instances,
     stations,
     users,
 );

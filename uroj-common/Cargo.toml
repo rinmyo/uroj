@@ -15,3 +15,7 @@ lazy_static = "1"
 strum = "0"
 strum_macros = "0"
 tokio-serde = { version = "0.8", features = ["json"] }
+futures = "0"
+tarpc = { version = "0.26", features = ["full"] }
+tokio = { version = "1", features = ["macros"] }
+uuid = "0"

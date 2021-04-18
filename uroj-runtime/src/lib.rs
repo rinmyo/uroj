@@ -37,7 +37,7 @@ pub fn create_schema_with_context(pool: InstancePool) -> Schema<Query, Mutation,
 pub fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
     ctx.data_opt::<Claims>()
         .map(|c| c.sub.clone())
-        .ok_or("not found login user")
+        .ok_or("not found login user".to_string())
 }
 
 pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {

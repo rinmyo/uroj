@@ -1,24 +1,26 @@
-use crate::schema::instance_configs;
-use crate::schema::instance_configs::dsl::*;
+use crate::schema::instances;
+use crate::schema::instances::dsl::*;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
+use super::user::User;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Insertable, Serialize, Deserialize, Debug, AsChangeset, Associations)]
-#[table_name = "instance_configs"]
-pub struct NewInstanceConfig {
+#[table_name = "instances"]
+pub struct NewInstance {
     pub title: String,
     pub description: String,
     pub creator: String,
     pub player: String,
     pub yaml: String,
     pub begin_at: NaiveDateTime,
-    pub token: Uuid,
+    pub executor_id: i32,  //指定
 }
 
 #[derive(Debug, Serialize, Deserialize, Identifiable, Associations, Queryable, AsChangeset)]
-pub struct InstanceConfig {
+#[belongs_to(User, foreign_key="player")]
+pub struct Instance {
     pub id: i32,
     pub title: String,
     pub description: String,
@@ -28,4 +30,5 @@ pub struct InstanceConfig {
     pub yaml: String,
     pub begin_at: NaiveDateTime,
     pub token: Uuid, //给别人以访问
+    pub executor_id: i32,
 }
