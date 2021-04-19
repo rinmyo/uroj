@@ -1,0 +1,21 @@
+---
+title: 测试站
+nodes:       
+  - node_id: 1
+    turnout_id: [1]
+    track_id: X1LQ
+    left_adj: [1]
+    right_adj: [1]
+    conflicted_nodes: [1, 2, 3]
+    line: [[1.0, 2.0], [3.0, 4.0]]
+    joint: [EMPTY, EMPTY]
+signals:
+  - id: S
+    is_left: true
+    is_up: true
+    sig_type: SHUNTING_SIGNAL
+    sig_mnt: POST_MOUNTING
+    protect_node_id: 2
+    toward_node_id: 4
+    btns: [PASS, GUIDE, TRAIN]
+independent_btns: []

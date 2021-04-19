@@ -30,6 +30,10 @@ impl Station {
     pub fn find_by_author_id(aid: &str, conn: &PgConnection) -> QueryResult<Vec<Self>> {
         stations.filter(author_id.eq(aid)).load(conn)
     }
+
+    pub fn find_by_author(a: &User, conn: &PgConnection) -> QueryResult<Vec<Self>> {
+        Station::belonging_to(a).load(conn)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Insertable)]

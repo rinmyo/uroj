@@ -4,9 +4,16 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_graphql::{async_trait, dataloader::Loader, guard::Guard, Context, Object, Result};
 use async_graphql::{EmptySubscription, Error, Schema};
-use uroj_common::utils::{Claims, Role as AuthRole};
+use chrono::Utc;
+use tarpc::context;
+use uroj_common::{
+    rpc::{self, InstanceConfig},
+    utils::{Claims, Role as AuthRole},
+};
 use uroj_db::connection::PgPool;
 use uroj_db::models::class::Class as ClassData;
+use uroj_db::models::executor::Executor as ExecutorData;
+use uroj_db::models::instance::{Instance as InstanceData, NewInstance as NewInstanceData};
 use uroj_db::models::station::{NewStation as NewStationData, Station as StationData};
 use uroj_db::models::user::User as UserData;
 
@@ -14,10 +21,14 @@ use class::Class;
 use user::User;
 
 use station::Station;
+use uuid::Uuid;
 
-use crate::get_conn_from_ctx;
+use crate::{get_client, get_conn_from_ctx, get_random_token};
 
-use self::station::StationInput;
+use self::{
+    instance::{Instance, InstanceInput, InstanceStatus},
+    station::StationInput,
+};
 
 pub type AppSchema = Schema<Query, Mutation, EmptySubscription>;
 
@@ -58,6 +69,13 @@ impl Query {
         let ref station = StationData::find(id, &get_conn_from_ctx(ctx))?;
         Ok(station.into())
     }
+
+    #[graphql(guard(LoginGaurd()))]
+    async fn instance(&self, ctx: &Context<'_>, uuid: String) -> Result<Instance> {
+        let uuid = Uuid::from_str(&uuid)?;
+        let ref instance = InstanceData::find_one(uuid, &get_conn_from_ctx(ctx))?;
+        Ok(instance.into())
+    }
 }
 
 pub struct Mutation;
@@ -81,9 +99,52 @@ impl Mutation {
         Ok(created_station.into())
     }
 
-    // async fn create_exam_instance(&self, ctx: &Context<'_>, input: NewInstanceInput) -> Result<String> {}
+    async fn create_instance(&self, ctx: &Context<'_>, input: InstanceInput) -> Result<Instance> {
+        let id = get_id_from_ctx(ctx).ok_or("Invalid token")?;
+        let conn = get_conn_from_ctx(ctx);
+        let user = UserData::get(&id, &conn)?;
+        let station = StationData::find(input.station_id, &conn)?;
 
-    // async fn create_train_instance(&self, ctx: &Context<'_>, input: NewTrainInput) -> Result {}
+        let new_instance = NewInstanceData {
+            title: input.title,
+            description: input.description,
+            creator: Some(user.id),
+            player: input.player,
+            yaml: station.yaml,
+            curr_state: InstanceStatus::default().to_string(),
+            executor_id: input.executor_id,
+            token: get_random_token(),
+        };
+
+        let created_instance = &new_instance.create(&conn)?;
+        Ok(created_instance.into())
+    }
+
+    async fn start_instance(&self, ctx: &Context<'_>, id: String) -> Result<String> {
+        let user_id = get_id_from_ctx(ctx).ok_or("Invalid token")?;
+        let conn = get_conn_from_ctx(ctx);
+        let uuid = Uuid::from_str(&id)?;
+        let ins = InstanceData::find_one(uuid, &conn)?;
+        //time bound
+        if Utc::now().naive_local() < ins.begin_at {
+            return Err(format!("instance {} cannot be initialized yet", id).into());
+        }
+
+        let addr = ExecutorData::find_one(ins.executor_id, &conn)?.addr;
+        let cfg = InstanceConfig {
+            id: ins.id.to_string(),
+            title: ins.title,
+            player: ins.player,
+            token: ins.token,
+            station: rpc::Station::from_yaml(&ins.yaml)?,
+        };
+        let title = get_client(&addr)
+            .await?
+            .run_instance(context::current(), cfg)
+            .await?;
+
+        Ok(title)
+    }
 }
 
 pub(crate) struct RoleGuard {
@@ -141,5 +202,6 @@ impl Loader<String> for UserLoader {
 }
 
 pub mod class;
+pub mod instance;
 pub mod station;
 pub mod user;

@@ -11,6 +11,7 @@ use petgraph::{
 };
 
 use tokio::time::sleep;
+use uroj_common::rpc::InstanceConfig;
 
 use super::components::{Node, NodeID, NodeStatus, Signal, Train};
 
@@ -20,7 +21,7 @@ use super::components::{Node, NodeID, NodeStatus, Signal, Train};
 // 3. パースの点はLOCKでもUSEでもいけないこと
 
 #[derive(Clone)]
-enum Direction {
+pub(crate) enum Direction {
     Left,
     Right,
     End,
@@ -88,8 +89,8 @@ impl StationGraph {
         Some(route)
     }
 
-    pub(crate) fn is_adjacent(&self, from: &NodeID, to: &NodeID) -> bool {
-        self.r_graph.contains_edge(from.clone(), from.clone())
+    pub(crate) fn direction(&self, from: &NodeID, to: &NodeID) -> Option<Direction> {
+        self.r_graph.edge_weight(from.clone(), to.clone()).map(|d|d.clone())
     }
 }
 
@@ -140,28 +141,41 @@ impl InstanceFSM {
     }
 }
 
+pub(crate) struct InstanceInfo {
+    id: String,
+    title: String,
+    player: String,
+    token: String,
+}
+
+impl From<&InstanceConfig> for InstanceInfo {
+    fn from(config: &InstanceConfig) -> Self {
+        InstanceInfo {
+            id: config.id,
+            title: config.title,
+            player: config.player,
+            token: config.token,
+        }
+    }
+}
+
 pub(crate) struct Instance {
     pub(crate) fsm: InstanceFSM,
     pub(crate) graph: StationGraph,
     trains: Vec<Train>,
-    whitelist: HashMap<String, GamerRole>,
-    state: InstanceState,
+    info: InstanceInfo,
 }
 
 impl Instance {
-    pub(crate) fn new(req: &NewInstanceRequest) -> Self {
-        let fsm = InstanceFSM::new(req.signals, req.nodes);
-        let graph = StationGraph::new(req.nodes);
+    pub(crate) fn new(cfg: &InstanceConfig) -> Self {
+        let fsm = InstanceFSM::new(cfg.station.signals, cfg.station.nodes);
+        let graph = StationGraph::new(cfg.station.nodes);
         Instance {
             fsm: fsm,
             graph: graph,
             trains: Vec::new(),
-            whitelist: req.whitelist,
+            info: cfg.into(),
         }
-    }
-
-    pub(crate) fn user_role(&self, id: &str) -> Option<GamerRole> {
-        self.whitelist.get(id).map(|role| role.clone())
     }
 
     //パースを作成する
@@ -225,16 +239,3 @@ impl Instance {
 
 pub(crate) type InstancePool = HashMap<String, Instance>;
 type TrainID = usize;
-
-enum InstanceState {
-    Uninitialized,
-    Playing,
-    Pause,
-    Result,
-}
-
-impl Default for InstanceState {
-    fn default() -> Self {
-        InstanceState::Uninitialized
-    }
-}

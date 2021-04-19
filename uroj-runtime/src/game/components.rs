@@ -9,9 +9,10 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uroj_common::rpc::{Node as StaticNode, Signal as StaticSignal, SignalKind};
 
-use super::{event::TrainMoveEvent, instance::Instance};
-
-use tokio::time::{sleep, Duration};
+use super::{
+    event::TrainMoveEvent,
+    instance::{Direction, Instance},
+};
 
 pub(crate) type NodeID = usize;
 //Node 狀態機，沒有耦合信息
@@ -21,7 +22,8 @@ pub(crate) struct Node {
     pub(crate) state: NodeStatus,
     pub(crate) is_lock: bool,
     pub(crate) once_occ: bool,
-    pub(crate) pro_sgn_id: (Option<String>, Option<String>), //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
+    pub(crate) left_sgn_id: Option<String>, //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
+    pub(crate) right_sgn_id: Option<String>, //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
 }
 
 impl Node {
@@ -43,7 +45,8 @@ impl From<&StaticNode> for Node {
             state: Default::default(),
             is_lock: false,
             once_occ: false,
-            pro_sgn_id: (None, None),
+            left_sgn_id: None,
+            right_sgn_id: None,
         }
     }
 }
@@ -64,12 +67,12 @@ impl Default for NodeStatus {
     }
 }
 
-
 pub(crate) struct Signal {
     pub(crate) signal_id: String,
     pub(crate) filament_status: (FilamentStatus, FilamentStatus),
     pub(crate) state: SignalStatus,
     pub(crate) used_flag: bool, //征用
+    pub(crate) kind: SignalKind,
 }
 
 impl From<&StaticSignal> for Signal {
@@ -90,6 +93,7 @@ impl From<&StaticSignal> for Signal {
             filament_status: filament_status,
             state: state,
             used_flag: false,
+            kind: data.sig_type,
         }
     }
 }
@@ -182,14 +186,20 @@ impl Train {
         let graph = &ins.graph;
         let curr = &self.curr_node();
         //鄰接保證物理上車可以移動
-        let is_adjacent = graph.is_adjacent(curr, target);
+        //行车方向
+        let dir = graph.direction(curr, target);
+        if let None = dir {
+            return false;
+        }
         //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
-        let is_allow = fsm
-            .node(target)
-            .pro_sgn_id
-            .map_or(true, |s| fsm.sgn(&s).is_allowed());
 
-        is_adjacent && is_allow
+        let pro_sgn_id = match dir.unwrap() {
+            Direction::Left => fsm.node(target).right_sgn_id,
+            Direction::Right => fsm.node(target).left_sgn_id,
+            Direction::End => return false,
+        };
+
+        pro_sgn_id.map_or(true, |s| fsm.sgn(&s).is_allowed())
     }
 
     async fn move_to(&mut self, target: &NodeID, ins: &Instance) {

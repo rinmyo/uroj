@@ -1,7 +1,7 @@
 use std::{
     net::{IpAddr, Ipv6Addr},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use actix_web::{guard, web};
@@ -23,9 +23,9 @@ pub fn configure_service(cfg: &mut web::ServiceConfig) {
     );
 }
 
-pub fn create_schema_with_context(pool: InstancePool) -> Schema<Query, Mutation, Subscription> {
-    let arc_pool = Arc::new(pool);
-
+pub fn create_schema_with_context(
+    arc_pool: Arc<Mutex<InstancePool>>,
+) -> Schema<Query, Mutation, Subscription> {
     Schema::build(Query, Mutation, Subscription)
         // limits are commented out, because otherwise introspection query won't work
         // .limit_depth(3)
@@ -49,12 +49,14 @@ pub fn borrow_instance_from_ctx<'ctx>(
     ctx: &Context<'ctx>,
     id: &str,
 ) -> Result<&'ctx Instance, String> {
-    ctx.data_unchecked::<Arc<InstancePool>>()
+    ctx.data_unchecked::<Arc<Mutex<InstancePool>>>()
+        .lock()
+        .unwrap()
         .get(id)
-        .ok_or("not found available instance".into())
+        .ok_or("err".to_string())
 }
 
-async fn run_rpc_server(port: u16) {
+async fn run_rpc_server(port: u16, arc_pool: Arc<Mutex<InstancePool>>) {
     let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), port);
 
     let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default)
@@ -67,7 +69,9 @@ async fn run_rpc_server(port: u16) {
         // Limit channels to 1 per IP.
         .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
         .map(|channel| {
-            let server = HelloServer(channel.transport().peer_addr().unwrap());
+            let server = rpc::RunnerServer {
+                instance_pool: arc_pool,
+            };
             channel.execute(server.serve())
         })
         // Max 10 channels.

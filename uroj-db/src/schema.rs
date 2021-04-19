@@ -8,24 +8,23 @@ table! {
 table! {
     executors (id) {
         id -> Int4,
-        host -> Varchar,
-        port -> Int4,
+        addr -> Varchar,
     }
 }
 
 table! {
     instances (id) {
-        id -> Int4,
+        id -> Uuid,
         title -> Varchar,
         description -> Nullable<Text>,
         created_at -> Timestamp,
         creator -> Nullable<Varchar>,
-        player -> Nullable<Varchar>,
+        player -> Varchar,
         yaml -> Text,
         curr_state -> Varchar,
         begin_at -> Timestamp,
-        token -> Nullable<Uuid>,
         executor_id -> Int4,
+        token -> Varchar,
     }
 }
 
