@@ -1,8 +1,4 @@
-use std::{
-    net::{IpAddr, Ipv6Addr},
-    str::FromStr,
-    sync::{Arc, Mutex},
-};
+use std::{net::{IpAddr, Ipv6Addr}, str::FromStr, sync::{Arc, Mutex, MutexGuard}};
 
 use actix_web::{guard, web};
 use async_graphql::{Context, Schema};
@@ -43,6 +39,12 @@ pub fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
 pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
     ctx.data_opt::<Claims>()
         .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
+}
+
+pub fn get_instance_pool_from_ctx<'ctx>(ctx: &Context<'ctx>) -> MutexGuard<'ctx, InstancePool> {
+    ctx.data_unchecked::<Arc<Mutex<InstancePool>>>()
+        .lock()
+        .unwrap()
 }
 
 pub fn borrow_instance_from_ctx<'ctx>(

@@ -2,12 +2,14 @@ use async_graphql::*;
 use async_stream::try_stream;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use uroj_common::rpc::GamerRole;
 
 use super::borrow_instance_from_ctx;
 use crate::{
-    game::components::{NodeID, NodeStatus, SignalStatus},
-    get_id_from_ctx,
+    game::{
+        components::{NodeID, NodeStatus, SignalStatus},
+        instance::PathBtn,
+    },
+    get_id_from_ctx, get_instance_pool_from_ctx,
 };
 
 #[derive(SimpleObject)]
@@ -108,31 +110,13 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    //开始
-    async fn start(&self, ctx: &Context<'_>, id: String) -> Result<()> {
-        let user = get_id_from_ctx(ctx)?;
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
-        match instance.user_role(&user) {
-            Some(GamerRole::Operator) | Some(GamerRole::Player) => {
-                //start game
-                Ok(())
-            }
-            _ => Err("Forbidden".into())
-        }
-    }
-
-    //暫停
-    async fn pause(&self, ctx: &Context<'_>, id: String) -> Result<()> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
-
-        Ok(())
-    }
-
     //结束
-    async fn stop(&self, ctx: &Context<'_>, id: String) -> Result<()> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
-
-        Ok(())
+    async fn stop(&self, ctx: &Context<'_>, id: String) -> Result<String> {
+        let mut instance = get_instance_pool_from_ctx(ctx);
+        match instance.remove(&id) {
+            Some(i) => Ok(i.info.id),
+            None => Err(format!("not found instance {}", id).into()),
+        }
     }
 
     //創建進路
@@ -143,7 +127,21 @@ impl Mutation {
         input: CreateRouteInput,
     ) -> Result<()> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
-        instance.create_path();
+
+        let start = PathBtn {
+            id: input.start_sgn,
+            kind: input.start_btn,
+        };
+        let end = PathBtn {
+            kind: input.end_btn,
+            id: match input.end_btn {
+                ButtonKind::Train | ButtonKind::Shunt => input.end_sgn.ok_or("error input")?,
+                ButtonKind::LZA => input.end_ind_btn.ok_or("error input")?,
+                _ => return Err("no valid route".into()),
+            },
+        };
+
+        instance.create_path(start, end)?;
 
         Ok(())
     }
@@ -153,11 +151,16 @@ impl Mutation {
         &self,
         ctx: &Context<'_>,
         id: String,
-        start_signal: String,
+        input: CancelRouteInput,
     ) -> Result<()> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
-        instance.create_path();
 
+        let start = PathBtn {
+            id: input.start_sgn,
+            kind: input.start_btn,
+        };
+
+        instance.cancel_path(start)?;
         Ok(())
     }
 
@@ -166,28 +169,42 @@ impl Mutation {
         &self,
         ctx: &Context<'_>,
         id: String,
-        start_signal: String,
+        input: CancelRouteInput,
     ) -> Result<()> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
-        instance.create_path();
 
+        let start = PathBtn {
+            id: input.start_sgn,
+            kind: input.start_btn,
+        };
+
+        instance.cancel_path(start)?;
         Ok(())
     }
 
     //區間故障解鎖
     async fn fault_unlock(&self, ctx: &Context<'_>, id: String, node: NodeID) -> Result<()> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
-        instance.create_path();
+        // instance.create_path();
 
         Ok(())
     }
 }
+
+//tag 可以是信號機ID或者獨立ButtonID
 #[derive(InputObject)]
 struct CreateRouteInput {
     start_btn: ButtonKind,
-    start_signal: String,
+    start_sgn: String,
     end_btn: ButtonKind,
-    end_node: usize,
+    end_sgn: Option<String>, //from independent button or signal button
+    end_ind_btn: Option<String>,
+}
+
+#[derive(InputObject)]
+struct CancelRouteInput {
+    start_btn: ButtonKind,
+    start_sgn: String,
 }
 
 pub struct Subscription;
@@ -212,6 +229,7 @@ pub enum ButtonKind {
     Shunt, //調車按鈕
     Train, //列車按鈕（接發車）
     Guide, //引導按鈕
+    LZA,   //列車終端按鈕
 }
 
 pub type AppSchema = Schema<Query, EmptyMutation, Subscription>;

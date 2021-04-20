@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Eq, PartialEq, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SignalKind {
     HomeSignal,     //進站信號機
@@ -21,6 +21,7 @@ pub enum ButtonKind {
     Shunt, //調車按鈕
     Train, //列車按鈕（接發車）
     Guide, //引導按鈕
+    LZA,   //列車終端按鈕
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -29,11 +30,13 @@ pub struct Signal {
     pub pos: Option<(f64, f64)>, //位置 渲染用
     pub is_left: Option<bool>,   //左右朝向 業務，渲染，防护区段的方向
     pub is_up: bool,             // 上下朝向 渲染
-    pub sig_type: SignalKind,    //信號類型 渲染用
-    pub sig_mnt: SignalMounting, //安裝方式 渲染用
+    pub sgn_type: SignalKind,    //信號類型 渲染用
+    pub sgn_mnt: SignalMounting, //安裝方式 渲染用
     pub protect_node_id: usize,  //防护node 的 ID 业务&渲染，防护node指的是其所防护的node
     pub toward_node_id: usize, //面朝的node ID, 若和上述node有公共点，则公共点就是信号机的位置, 再判断两个node的相对位置来决定左右朝向，如果没有则使用pos
     pub btns: Vec<ButtonKind>, //按钮
+    pub jux_sgn: Option<String>, //并置信號機
+    pub dif_sgn: Option<String>, //差置信号机
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -59,8 +62,9 @@ pub struct Node {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct IndButton {
-    kind: ButtonKind,
-    pos: (f64, f64),
+    pub id: String,
+    pub kind: ButtonKind,
+    pub pos: (f64, f64),
     pub protect_node_id: usize,
 }
 

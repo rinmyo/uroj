@@ -25,7 +25,7 @@ impl Runner for RunnerServer {
         if pool.contains_key(&cfg.id) {
             return Err(format!("instance {} is already running", cfg.id));
         }
-        let instance = Instance::new(&cfg);
+        let instance = Instance::new(&cfg)?;
         pool.insert(cfg.id, instance);
         Ok(cfg.id)
     }

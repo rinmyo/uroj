@@ -73,17 +73,20 @@ pub(crate) struct Signal {
     pub(crate) state: SignalStatus,
     pub(crate) used_flag: bool, //征用
     pub(crate) kind: SignalKind,
+    pub(crate) toward_node_id: NodeID,
+    pub(crate) protect_node_id: NodeID,
+    pub(crate) direction: Direction, //朝向
 }
 
 impl From<&StaticSignal> for Signal {
     fn from(data: &StaticSignal) -> Self {
-        let filament_status = match data.sig_type {
+        let filament_status = match data.sgn_type {
             //调车信号机只有一个灯丝
             SignalKind::ShuntingSignal => (Default::default(), FilamentStatus::None),
             _ => (Default::default(), Default::default()),
         };
 
-        let state = match data.sig_type {
+        let state = match data.sgn_type {
             SignalKind::ShuntingSignal => SignalStatus::A,
             _ => SignalStatus::H,
         };
@@ -93,7 +96,10 @@ impl From<&StaticSignal> for Signal {
             filament_status: filament_status,
             state: state,
             used_flag: false,
-            kind: data.sig_type,
+            kind: data.sgn_type,
+            toward_node_id: data.toward_node_id,
+            protect_node_id: data.protect_node_id,
+            direction: Direction::Left,
         }
     }
 }
@@ -196,7 +202,6 @@ impl Train {
         let pro_sgn_id = match dir.unwrap() {
             Direction::Left => fsm.node(target).right_sgn_id,
             Direction::Right => fsm.node(target).left_sgn_id,
-            Direction::End => return false,
         };
 
         pro_sgn_id.map_or(true, |s| fsm.sgn(&s).is_allowed())

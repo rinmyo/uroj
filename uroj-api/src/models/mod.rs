@@ -143,7 +143,7 @@ impl Mutation {
             .run_instance(context::current(), cfg)
             .await?;
 
-        Ok(title)
+        title.map_err(|e| e.into())
     }
 }
 
