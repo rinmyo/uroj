@@ -2,11 +2,12 @@ use async_graphql::*;
 use async_stream::try_stream;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use strum_macros::*;
 
 use super::borrow_instance_from_ctx;
 use crate::{
     game::{
-        components::{NodeID, NodeStatus, SignalStatus},
+        components::{NodeID, SignalStatus},
         instance::PathBtn,
     },
     get_id_from_ctx, get_instance_pool_from_ctx,
@@ -79,12 +80,12 @@ pub(crate) struct Query;
 impl Query {
     //获取车站布局
     async fn station_layout(&self, ctx: &Context<'_>, id: String) -> Result<StationData> {
-        4
+        todo!()
     }
 
     //获取全局状态
     async fn global_status(&self, ctx: &Context<'_>, id: String) -> Result<GlobalStatus> {
-        4
+        todo!()
     }
 }
 
@@ -94,14 +95,22 @@ pub(crate) enum GameFrame {
     UpdateNode(UpdateNode),
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Enum, Display, EnumString)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum NodeStatus {
+    Lock,
+    Vacant,
+    Occupied,
+}
+
 #[derive(SimpleObject, Clone, Eq, PartialEq, Serialize, Deserialize)]
-struct UpdateSignal {
-    id: String,
+pub(crate) struct UpdateSignal {
+    pub(crate) id: String,
     state: SignalStatus,
 }
 
 #[derive(SimpleObject, Clone, Eq, PartialEq, Serialize, Deserialize)]
-struct UpdateNode {
+pub(crate) struct UpdateNode {
     id: NodeID,
     state: NodeStatus,
 }
@@ -125,7 +134,7 @@ impl Mutation {
         ctx: &Context<'_>,
         id: String,
         input: CreateRouteInput,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
 
         let start = PathBtn {
@@ -143,7 +152,7 @@ impl Mutation {
 
         instance.create_path(start, end)?;
 
-        Ok(())
+        Ok(id)
     }
 
     //取消進路
@@ -152,7 +161,7 @@ impl Mutation {
         ctx: &Context<'_>,
         id: String,
         input: CancelRouteInput,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
 
         let start = PathBtn {
@@ -160,8 +169,8 @@ impl Mutation {
             kind: input.start_btn,
         };
 
-        instance.cancel_path(start)?;
-        Ok(())
+        instance.cancel_path(start).await?;
+        Ok(id)
     }
 
     //人工解鎖
@@ -170,7 +179,7 @@ impl Mutation {
         ctx: &Context<'_>,
         id: String,
         input: CancelRouteInput,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
 
         let start = PathBtn {
@@ -178,16 +187,16 @@ impl Mutation {
             kind: input.start_btn,
         };
 
-        instance.cancel_path(start)?;
-        Ok(())
+        instance.cancel_path(start).await?;
+        Ok(id)
     }
 
     //區間故障解鎖
-    async fn fault_unlock(&self, ctx: &Context<'_>, id: String, node: NodeID) -> Result<()> {
+    async fn fault_unlock(&self, ctx: &Context<'_>, id: String, node: NodeID) -> Result<String> {
         let instance = borrow_instance_from_ctx(ctx, &id)?;
         // instance.create_path();
 
-        Ok(())
+        Ok(id)
     }
 }
 
@@ -207,21 +216,18 @@ struct CancelRouteInput {
     start_sgn: String,
 }
 
-pub struct Subscription;
+// pub struct Subscription;
 
-#[Subscription]
-impl Subscription {
-    async fn game_update<'ctx>(
-        &self,
-        ctx: &'ctx Context<'_>,
-        id: String,
-    ) -> impl Stream<Item = Result<GameFrame>> + 'ctx {
-        try_stream! {
-            let instance = borrow_instance_from_ctx(ctx, id)?;
-
-        }
-    }
-}
+// #[Subscription]
+// impl Subscription {
+//     async fn game_update<'ctx>(
+//         &self,
+//         ctx: &'ctx Context<'_>,
+//         id: String,
+//     ) -> impl Stream<Item = Result<GameFrame>> + 'ctx {
+//         todo!()
+//     }
+// }
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq)]
 pub enum ButtonKind {
@@ -232,4 +238,4 @@ pub enum ButtonKind {
     LZA,   //列車終端按鈕
 }
 
-pub type AppSchema = Schema<Query, EmptyMutation, Subscription>;
+pub type AppSchema = Schema<Query, EmptyMutation, EmptySubscription>;

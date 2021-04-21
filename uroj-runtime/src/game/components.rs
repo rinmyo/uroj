@@ -6,8 +6,13 @@ use strum_macros::*;
 
 use async_graphql::Enum;
 use serde::{Deserialize, Serialize};
-use tokio::time::sleep;
-use uroj_common::rpc::{Node as StaticNode, Signal as StaticSignal, SignalKind};
+use tokio::{
+    sync::mpsc::{self, Sender},
+    time::sleep,
+};
+use uroj_common::rpc::{Node as StaticNode, NodeKind, Signal as StaticSignal, SignalKind};
+
+use crate::models::{GameFrame, UpdateNode, UpdateSignal};
 
 use super::{
     event::TrainMoveEvent,
@@ -20,6 +25,7 @@ pub(crate) struct Node {
     pub(crate) node_id: NodeID,
     pub(crate) used_count: u32, //被征用计数，每次征用则INC，每次作为S扩展集中的点被解除征用则减1，为0则说明未被征用
     pub(crate) state: NodeStatus,
+    pub(crate) kind: NodeKind,
     pub(crate) is_lock: bool,
     pub(crate) once_occ: bool,
     pub(crate) left_sgn_id: Option<String>, //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
@@ -27,13 +33,21 @@ pub(crate) struct Node {
 }
 
 impl Node {
-    pub(crate) async fn unlock(&mut self) {
+    pub(crate) async fn unlock(&mut self, sender: &Sender<GameFrame>) {
         sleep(Duration::from_secs(3)).await;
         self.is_lock = false;
+        sender.send(GameFrame::UpdateNode(UpdateNode {
+            id: self.node_id,
+            state: crate::models::NodeStatus::Vacant,
+        }));
     }
 
-    pub(crate) fn lock(&mut self) {
+    pub(crate) fn lock(&mut self, sender: &Sender<GameFrame>) {
         self.is_lock = true;
+        sender.send(GameFrame::UpdateNode(UpdateNode {
+            id: self.node_id,
+            state: crate::models::NodeStatus::Lock,
+        }));
     }
 }
 
@@ -47,6 +61,7 @@ impl From<&StaticNode> for Node {
             once_occ: false,
             left_sgn_id: None,
             right_sgn_id: None,
+            kind: data.node_kind.clone(),
         }
     }
 }
@@ -92,11 +107,11 @@ impl From<&StaticSignal> for Signal {
         };
 
         Signal {
-            signal_id: data.id,
+            signal_id: data.id.clone(),
             filament_status: filament_status,
             state: state,
             used_flag: false,
-            kind: data.sgn_type,
+            kind: data.sgn_type.clone(),
             toward_node_id: data.toward_node_id,
             protect_node_id: data.protect_node_id,
             direction: Direction::Left,
@@ -119,25 +134,51 @@ impl Signal {
         }
     }
 
-    pub(crate) fn update(&mut self, state: SignalStatus) {
+    fn update(&mut self, state: SignalStatus, sender: &Sender<GameFrame>) {
         self.state = state;
+
+        sender.send(GameFrame::UpdateSignal(UpdateSignal {
+            id: self.signal_id.clone(),
+            state: state,
+        }));
     }
 
-    pub(crate) fn protect(&mut self) {
-        self.update(match self.kind {
+    pub(crate) fn protect(&mut self, sender: &Sender<GameFrame>) {
+        let new_state = match self.kind {
             SignalKind::HomeSignal => SignalStatus::H,
             SignalKind::StartingSignal => SignalStatus::H,
             SignalKind::ShuntingSignal => SignalStatus::A,
-        })
+        };
+        self.update(new_state, sender);
     }
 
-    //开放信号机需要根据进路条件决定
-    pub(crate) fn open(&mut self) {
-        self.update(match self.kind {
-            SignalKind::HomeSignal => SignalStatus::H,
-            SignalKind::StartingSignal => SignalStatus::H,
-            SignalKind::ShuntingSignal => SignalStatus::A,
-        })
+    //开放接车进路
+    pub(crate) fn open_recv(&mut self, goal_kind: NodeKind, sender: &Sender<GameFrame>) {
+        let new_state = match goal_kind {
+            NodeKind::Mainline => SignalStatus::U,
+            NodeKind::Siding => SignalStatus::UU,
+            NodeKind::Siding18 => SignalStatus::US,
+            NodeKind::Normal => return,
+        };
+        self.update(new_state, sender);
+    }
+
+    //开放发车进路信号
+    pub(crate) fn open_send(&mut self, sender: &Sender<GameFrame>) {
+        self.update(SignalStatus::L, sender);
+    }
+
+    //开放通過進路信號
+    pub(crate) fn open_pass(&mut self, sender: &Sender<GameFrame>) {
+        self.update(SignalStatus::L, sender);
+    }
+
+    //开放调车进路信号
+    pub(crate) fn open_shnt<'a>(
+        sgns: impl Iterator<Item = &'a mut Self>,
+        sender: &Sender<GameFrame>,
+    ) {
+        sgns.for_each(|sgn| sgn.update(SignalStatus::L, sender));
     }
 }
 
@@ -199,9 +240,10 @@ impl Train {
         }
         //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
 
+        let target_node = fsm.node(target);
         let pro_sgn_id = match dir.unwrap() {
-            Direction::Left => fsm.node(target).right_sgn_id,
-            Direction::Right => fsm.node(target).left_sgn_id,
+            Direction::Left => target_node.right_sgn_id.as_ref(),
+            Direction::Right => target_node.left_sgn_id.as_ref(),
         };
 
         pro_sgn_id.map_or(true, |s| fsm.sgn(&s).is_allowed())

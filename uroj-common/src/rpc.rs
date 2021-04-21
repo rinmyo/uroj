@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Eq, PartialEq, Deserialize, Serialize, Debug)]
+#[derive(Eq, PartialEq, Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SignalKind {
     HomeSignal,     //進站信號機
@@ -48,9 +48,19 @@ pub enum JointKind {
     Empty,     //无
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum NodeKind {
+    Mainline,    //正线股道
+    Siding,     //站线股道
+    Siding18,  //18道岔以上展现
+    Normal //一般节点
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Node {
     pub node_id: usize,
+    pub node_kind: NodeKind,
     pub turnout_id: Vec<usize>, //无岔區段則空，len即为包含道岔数，通過計算得出岔心
     pub track_id: String,       //所属軌道電路， 用於構建 B 關係，特殊區段（接近、 離去）通過id識別
     pub left_adj: Vec<usize>,   //左鄰 用於構建 R 關係

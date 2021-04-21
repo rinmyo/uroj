@@ -1,12 +1,10 @@
 use std::{net::{IpAddr, Ipv6Addr}, str::FromStr, sync::{Arc, Mutex, MutexGuard}};
 
 use actix_web::{guard, web};
-use async_graphql::{Context, Schema};
-use futures::{future, prelude::*};
+use async_graphql::{Context, EmptySubscription, Schema};
 use game::instance::{Instance, InstancePool};
-use models::{Mutation, Query, Subscription};
-use tarpc::server::{self, Channel, Incoming};
-use tokio_serde::formats::Json;
+use models::{Mutation, Query, };
+
 use uroj_common::utils::{Claims, Role as AuthRole};
 
 pub fn configure_service(cfg: &mut web::ServiceConfig) {
@@ -21,8 +19,8 @@ pub fn configure_service(cfg: &mut web::ServiceConfig) {
 
 pub fn create_schema_with_context(
     arc_pool: Arc<Mutex<InstancePool>>,
-) -> Schema<Query, Mutation, Subscription> {
-    Schema::build(Query, Mutation, Subscription)
+) -> Schema<Query, Mutation, EmptySubscription> {
+    Schema::build(Query, Mutation, EmptySubscription)
         // limits are commented out, because otherwise introspection query won't work
         // .limit_depth(3)
         // .limit_complexity(15)
@@ -56,30 +54,6 @@ pub fn borrow_instance_from_ctx<'ctx>(
         .unwrap()
         .get(id)
         .ok_or("err".to_string())
-}
-
-async fn run_rpc_server(port: u16, arc_pool: Arc<Mutex<InstancePool>>) {
-    let server_addr = (IpAddr::V6(Ipv6Addr::LOCALHOST), port);
-
-    let mut listener = tarpc::serde_transport::tcp::listen(&server_addr, Json::default)
-        .await
-        .unwrap();
-    listener.config_mut().max_frame_length(usize::MAX);
-    listener
-        .filter_map(|r| future::ready(r.ok()))
-        .map(server::BaseChannel::with_defaults)
-        // Limit channels to 1 per IP.
-        .max_channels_per_key(1, |t| t.transport().peer_addr().unwrap().ip())
-        .map(|channel| {
-            let server = rpc::RunnerServer {
-                instance_pool: arc_pool,
-            };
-            channel.execute(server.serve())
-        })
-        // Max 10 channels.
-        .buffer_unordered(10)
-        .for_each(|_| async {})
-        .await;
 }
 
 mod game;

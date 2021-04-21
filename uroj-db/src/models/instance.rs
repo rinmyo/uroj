@@ -1,14 +1,11 @@
-use std::str::FromStr;
-
 use super::user::User;
 use crate::schema::instances;
 use crate::schema::instances::dsl::*;
 use chrono::NaiveDateTime;
 use diesel::prelude::*;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize, Identifiable, Associations, Queryable, AsChangeset)]
+#[derive(Debug, Identifiable, Associations, Queryable, AsChangeset)]
 #[belongs_to(User, foreign_key = "player")]
 pub struct Instance {
     pub id: Uuid,
@@ -30,7 +27,7 @@ impl Instance {
     }
 }
 
-#[derive(Insertable, Serialize, Deserialize, Debug, AsChangeset, Associations)]
+#[derive(Insertable, Debug, AsChangeset, Associations)]
 #[table_name = "instances"]
 pub struct NewInstance {
     pub title: String,
