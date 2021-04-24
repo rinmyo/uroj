@@ -7,14 +7,7 @@ use models::{AppSchema, Mutation, Query, UserLoader};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 
-use uroj_common::rpc::RunnerClient;
 use uroj_db::connection::{Conn, PgPool};
-
-use tarpc::{
-    client::{self, NewClient},
-    serde_transport,
-    tokio_serde::formats::Json,
-};
 
 pub fn configure_service(cfg: &mut web::ServiceConfig) {
     cfg.service(handlers::index_playground)
@@ -48,13 +41,6 @@ pub fn get_random_token() -> String {
         .map(char::from)
         .collect::<String>()
         .to_uppercase()
-}
-
-pub async fn get_client(server_addr: &str) -> Result<RunnerClient, String> {
-    let client_transport = serde_transport::tcp::connect(server_addr, Json::default)
-        .await
-        .map_err(|_| format!("cannot connect to runner:{}", server_addr))?;
-    Ok(RunnerClient::new(client::Config::default(), client_transport).spawn())
 }
 
 mod handlers;

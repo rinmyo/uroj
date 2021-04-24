@@ -1,203 +1,30 @@
+pub mod fsm;
+pub mod graph;
+pub mod station;
+pub mod train;
+
+use rdkafka::producer::FutureProducer;
 use std::{collections::HashMap, sync::Arc};
+use strum_macros::*;
 use tokio::sync::Mutex;
 
-use petgraph::{
-    algo,
-    graphmap::{DiGraphMap, UnGraphMap},
-};
+use serde::{Deserialize, Serialize};
 
-use tokio::sync::{
-    mpsc,
-    mpsc::{Receiver, Sender},
-};
-use uroj_common::rpc::InstanceConfig;
-use uroj_common::rpc::{Node as StaticNode, Signal as StaticSignal};
-use uroj_common::rpc::{NodeKind, SignalKind};
+use crate::raw_station::{RawSignalKind, RawStation};
 
-use crate::models::{ButtonKind, GameFrame};
+use self::fsm::*;
+use self::graph::StationGraph;
+use self::station::{ButtonKind, StationData};
+use self::train::Train;
 
-use super::components::{Node, NodeID, NodeStatus, Signal, Train};
-
-// 進路になる必要な条件：
-// １．r_graphの点でできるパースのこと
-// 2. パースの点たちは相互にS関係がないこと
-// 3. パースの点はLOCKでもUSEでもいけないこと
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) enum Direction {
-    Left,
-    Right,
-}
-
-impl Direction {
-    pub(crate) fn reverse(&self) -> Self {
-        match self {
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
-        }
-    }
-}
-
-//站場圖
-pub(crate) struct StationGraph {
-    r_graph: DiGraphMap<NodeID, Direction>,
-    s_graph: UnGraphMap<NodeID, ()>,
-    // b_graph: UnGraphMap<NodeID, ()>,
-}
-
-impl StationGraph {
-    fn new(data: Vec<StaticNode>) -> StationGraph {
-        let mut r_graph = DiGraphMap::new();
-        let mut s_graph = UnGraphMap::new();
-        // let b_graph= UnGraphMap::new();
-
-        data.iter().for_each(|n| {
-            for i in &n.left_adj {
-                r_graph.add_edge(n.node_id, *i, Direction::Left);
-            }
-            for i in &n.right_adj {
-                r_graph.add_edge(n.node_id, *i, Direction::Right);
-            }
-            for i in &n.conflicted_nodes {
-                s_graph.add_edge(n.node_id, *i, ());
-            }
-        });
-
-        StationGraph {
-            r_graph: r_graph,
-            s_graph: s_graph,
-            // b_graph: b_graph,
-        }
-    }
-
-    //可能な進路を探す
-    fn available_path(&self, start: NodeID, goal: NodeID) -> Option<(Vec<NodeID>, Direction)> {
-        if start == goal {
-            return None;
-        }
-        let maybe_path = algo::astar(&self.r_graph, start, |node| node == goal, |_| 1, |_| 0)
-            .map(|(_, path)| path)?;
-        //pathはS関係に違反すると、必ず有効な進路じゃないということになる
-        for (i, &j) in maybe_path.iter().enumerate() {
-            for k in i + 1..maybe_path.len() {
-                if self.s_graph.contains_edge(j, maybe_path[k]) {
-                    return None;
-                }
-            }
-        }
-        let dir = self
-            .r_graph
-            .edge_weight(maybe_path[0], maybe_path[1])?
-            .clone();
-        Some((maybe_path, dir))
-    }
-
-    pub(crate) fn direction(&self, from: &NodeID, to: &NodeID) -> Option<Direction> {
-        self.r_graph
-            .edge_weight(from.clone(), to.clone())
-            .map(|d| d.clone())
-    }
-}
-
-struct Route {
-    path: Vec<NodeID>,
-    dir: Direction,
-}
-
-//實例狀態機
-pub(crate) struct InstanceFSM {
-    sgns: HashMap<String, Signal>,
-    nodes: HashMap<NodeID, Node>,
-}
-
-impl InstanceFSM {
-    fn new(
-        sgn_vec: Vec<StaticSignal>,
-        node_vec: Vec<StaticNode>,
-        graph: &StationGraph,
-    ) -> Result<InstanceFSM, String> {
-        let mut sgns: HashMap<String, Signal> =
-            sgn_vec.iter().map(|s| (s.id.clone(), s.into())).collect();
-        let mut nodes: HashMap<NodeID, Node> =
-            node_vec.iter().map(|n| (n.node_id, n.into())).collect();
-
-        for s in sgn_vec {
-            let pid = s.protect_node_id;
-            let tid = s.toward_node_id;
-
-            let dir = graph
-                .direction(&pid, &tid)
-                .or_else(|| match s.is_left {
-                    Some(true) => Some(Direction::Left),
-                    Some(false) => Some(Direction::Right),
-                    None => None,
-                })
-                .ok_or(format!("connot parse the direction of signal {}", s.id))?;
-
-            let sgn = sgns.get_mut(&s.id).unwrap();
-            (*sgn).direction = dir.clone();
-
-            let p_node = nodes
-                .get_mut(&pid)
-                .ok_or(format!("unknown node id: {}", pid))?;
-
-            match dir {
-                Direction::Left => (*p_node).left_sgn_id = Some(s.id),
-                Direction::Right => (*p_node).right_sgn_id = Some(s.id),
-            }
-        }
-
-        Ok(InstanceFSM {
-            sgns: sgns,
-            nodes: nodes,
-        })
-    }
-
-    pub(crate) fn node_mut(&mut self, id: NodeID) -> &mut Node {
-        &mut self.nodes[&id]
-    }
-
-    pub(crate) fn node(&self, id: NodeID) -> &Node {
-        &self.nodes[&id]
-    }
-
-    pub(crate) fn sgn(&self, id: &str) -> &Signal {
-        &self.sgns[id]
-    }
-
-    pub(crate) fn sgn_mut(&self, id: &str) -> &mut Signal {
-        &mut self.sgns[id]
-    }
-}
-
-pub(crate) struct InstanceInfo {
-    pub(crate) id: String,
-    pub(crate) title: String,
-    pub(crate) player: String,
-    pub(crate) token: String,
-}
-
-impl From<&InstanceConfig> for InstanceInfo {
-    fn from(config: &InstanceConfig) -> Self {
-        InstanceInfo {
-            id: config.id,
-            title: config.title,
-            player: config.player,
-            token: config.token,
-        }
-    }
-}
-
-pub(crate) struct Instance {
+pub struct Instance {
     pub(crate) fsm: Arc<Mutex<InstanceFSM>>,
     pub(crate) graph: StationGraph,
+    pub(crate) trains: Vec<Train>,
+    pub(crate) station: StationData,
     pub(crate) dif_relation: HashMap<String, String>,
     pub(crate) jux_relation: HashMap<String, String>, //signal -> signal
     pub(crate) ind_btn: HashMap<String, NodeID>,      //按鈕ID -> 防護節點ID
-    pub(crate) trains: Vec<Train>,
-    pub(crate) info: InstanceInfo,
-    pub(crate) frame_tx: Sender<GameFrame>,
-    pub(crate) frame_rx: Receiver<GameFrame>,
 }
 
 pub(crate) struct PathBtn {
@@ -207,30 +34,30 @@ pub(crate) struct PathBtn {
 
 impl Instance {
     pub(crate) fn new(cfg: &InstanceConfig) -> Result<Self, String> {
-        let signals = cfg.station.signals;
-        let nodes = cfg.station.nodes;
+        let signals = &cfg.station.signals;
+        let nodes = &cfg.station.nodes;
 
         let graph = StationGraph::new(nodes);
         let fsm = InstanceFSM::new(signals, nodes, &graph)?;
 
         let jux_relation = signals
             .iter()
-            .filter_map(|s| s.jux_sgn.map(|k| (s.id, k)))
+            .filter_map(|s| s.jux_sgn.as_ref().map(|k| (s.id.clone(), k.clone())))
             .collect();
 
         let dif_relation = signals
             .iter()
-            .filter_map(|s| s.dif_sgn.map(|k| (s.id, k)))
+            .filter_map(|s| s.dif_sgn.as_ref().map(|k| (s.id.clone(), k.clone())))
             .collect();
 
         let ind_btn = cfg
             .station
             .independent_btns
             .iter()
-            .map(|b| (b.id, b.protect_node_id))
+            .map(|b| (b.id.clone(), b.protect_node_id))
             .collect();
 
-        let (mut tx, rx) = mpsc::channel(32);
+        let station = StationData::new(&nodes, &signals, &fsm, &cfg.title)?;
 
         Ok(Instance {
             fsm: Arc::new(Mutex::new(fsm)),
@@ -239,9 +66,7 @@ impl Instance {
             jux_relation: jux_relation,
             ind_btn: ind_btn,
             trains: Vec::new(),
-            info: cfg.into(),
-            frame_tx: tx,
-            frame_rx: rx,
+            station: station,
         })
     }
 
@@ -250,6 +75,7 @@ impl Instance {
         &self,
         start: PathBtn,
         end: PathBtn,
+        producer: &FutureProducer,
     ) -> Result<Vec<NodeID>, String> {
         let arc_fsm = self.fsm.clone();
         let mut fsm = arc_fsm.lock().await;
@@ -295,12 +121,12 @@ impl Instance {
                     .ok_or(format!("unknown signal id: {}", &end.id))?;
                 match (&start_sgn.kind, &end_sgn.kind) {
                     //進站信號機 -> 出戰信號機 => 接車進路
-                    (SignalKind::HomeSignal, SignalKind::StartingSignal) => {
+                    (RawSignalKind::HomeSignal, RawSignalKind::StartingSignal) => {
                         is_recv = true;
                         (end_sgn.toward_node_id, end_sgn.direction.clone())
                     }
                     //出站信號機 -> 進站信號機 => 發車進路
-                    (SignalKind::StartingSignal, SignalKind::HomeSignal) => {
+                    (RawSignalKind::StartingSignal, RawSignalKind::HomeSignal) => {
                         is_send = true;
                         (end_sgn.protect_node_id, end_sgn.direction.clone())
                     }
@@ -311,7 +137,7 @@ impl Instance {
             (ButtonKind::Train, ButtonKind::LZA) => {
                 is_send = true;
                 match start_sgn.kind {
-                    SignalKind::StartingSignal => {
+                    RawSignalKind::StartingSignal => {
                         let node_id = self
                             .ind_btn
                             .get(&end.id)
@@ -381,7 +207,7 @@ impl Instance {
         //锁闭区段
         for id in &maybe_path {
             let node = fsm.node_mut(*id);
-            node.lock(&self.frame_tx);
+            node.lock(producer).await;
             node.once_occ = false; //重置曾占用flag
             graph.s_graph.neighbors(*id).for_each(|id| {
                 fsm.node_mut(id).used_count += 1;
@@ -396,33 +222,38 @@ impl Instance {
             .ok_or(format!("unknown signal id: {}", &start.id))?;
 
         if is_pass {
-            start_sgn.open_pass(&self.frame_tx);
+            start_sgn.open_pass(producer).await;
         }
 
         if is_send {
-            start_sgn.open_send(&self.frame_tx);
+            start_sgn.open_send(producer).await;
         }
 
         if is_recv {
             let arc_fsm = self.fsm.clone();
             let fsm = arc_fsm.lock().await;
             let node = fsm.node(goal_node);
-            start_sgn.open_recv(node.kind.clone(), &self.frame_tx);
+            start_sgn.open_recv(node.kind.clone(), producer).await;
         }
 
         if is_shnt {
-            let sgns = sgn_id.iter().map(|id| fsm.sgn_mut(id));
-            Signal::open_shnt(sgns, &self.frame_tx);
+            for id in sgn_id {
+                let sgn = fsm.sgn_mut(&id);
+                sgn.open_shnt(producer).await;
+            }
         }
 
         Ok(maybe_path)
     }
 
     //進路を消す
-    pub(crate) async fn cancel_path(&self, start: PathBtn) -> Result<(), String> {
+    pub(crate) async fn cancel_path(
+        &self,
+        start: PathBtn,
+        producer: &FutureProducer,
+    ) -> Result<(), String> {
         let arc_fsm = self.fsm.clone();
         let fsm = arc_fsm.lock().await;
-        let graph = &self.graph;
 
         let start_sgn = fsm
             .sgns
@@ -436,14 +267,13 @@ impl Instance {
             .ok_or("not find a existed route")?;
 
         //調車進路解鎖所有調車信號機
-        if start_sgn.kind == SignalKind::ShuntingSignal {
+        if start_sgn.kind == RawSignalKind::ShuntingSignal {
             for n in maybe_route {
-                let frame_tx = self.frame_tx.clone();
-
                 let arc_fsm = self.fsm.clone();
+                let asy_producer = producer.clone();
                 tokio::spawn(async move {
                     let mut fsm = arc_fsm.lock().await;
-                    fsm.node_mut(n).unlock(&frame_tx).await;
+                    fsm.node_mut(n).unlock(&asy_producer).await;
                 });
 
                 let sgn_id = match start_dir {
@@ -452,9 +282,11 @@ impl Instance {
                 };
 
                 if let Some(sgn_id) = sgn_id {
+                    let arc_fsm = self.fsm.clone();
+                    let mut fsm = arc_fsm.lock().await;
                     let sgn = fsm.sgn_mut(&sgn_id);
-                    if sgn.kind == SignalKind::ShuntingSignal {
-                        sgn.protect(&self.frame_tx)
+                    if sgn.kind == RawSignalKind::ShuntingSignal {
+                        sgn.protect(&producer).await;
                     }
                 }
             }
@@ -487,7 +319,7 @@ impl Instance {
         let graph = &self.graph;
         let edges = graph.r_graph.edges(start_node);
 
-        for (f, t, d) in edges {
+        for (_, t, d) in edges {
             let to = fsm.node(t);
             if d == dir && to.is_lock && to.state == NodeStatus::Vacant {
                 return Some(t);
@@ -497,5 +329,28 @@ impl Instance {
     }
 }
 
-pub(crate) type InstancePool = HashMap<String, Instance>;
-type TrainID = usize;
+#[derive(Deserialize, Serialize, Debug)]
+pub struct InstanceConfig {
+    pub id: String,
+    pub title: String,
+    pub player: String,
+    pub station: RawStation,
+    pub token: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub enum InstanceData {
+    Exam { exam_id: String },
+    Chain,
+    Exercise,
+}
+
+#[derive(Eq, PartialEq, Display, EnumString)]
+#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+pub enum InstanceStatus {
+    Prestart, //启动前
+    Playing,  //使用中
+    Finished, //已结束
+}
+
+pub type InstancePool = HashMap<String, Instance>;

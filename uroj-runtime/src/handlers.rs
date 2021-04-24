@@ -1,6 +1,7 @@
-use actix_web::{get, web, HttpRequest, HttpResponse, Result};
+use actix_web::{HttpRequest, HttpResponse, Result, get, post, web};
 use async_graphql::{Schema, http::{playground_source, GraphQLPlaygroundConfig}};
-use async_graphql_actix_web::WSSubscription;
+use async_graphql_actix_web::{Request, Response, WSSubscription};
+use uroj_common::utils::get_claims;
 
 use crate::models::AppSchema;
 
@@ -19,4 +20,16 @@ pub(crate) async fn index_playground() -> HttpResponse {
         .body(playground_source(
             GraphQLPlaygroundConfig::new("/").subscription_endpoint("/"),
         ))
+}
+
+#[post("/")]
+pub(crate) async fn index(schema: web::Data<AppSchema>, http_req: HttpRequest, req: Request) -> Response {
+    let mut query = req.into_inner();
+
+    let maybe_claims = get_claims(http_req);
+    if let Some(claims) = maybe_claims {
+        query = query.data(claims);
+    }
+
+    schema.execute(query).await.into()
 }

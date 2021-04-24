@@ -25,6 +25,14 @@ impl Instance {
     pub fn find_one(uid: Uuid, conn: &PgConnection) -> QueryResult<Self> {
         instances.find(uid).first(conn)
     }
+
+    pub fn update_state(&self, new_state: String, conn: &PgConnection) -> QueryResult<()> {
+        diesel::update(self)
+            .set(curr_state.eq(new_state))
+            .execute(conn)?;
+
+        Ok(())
+    }
 }
 
 #[derive(Insertable, Debug, AsChangeset, Associations)]

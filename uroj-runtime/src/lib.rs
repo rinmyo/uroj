@@ -1,31 +1,49 @@
-use std::{net::{IpAddr, Ipv6Addr}, str::FromStr, sync::{Arc, Mutex, MutexGuard}};
-
 use actix_web::{guard, web};
-use async_graphql::{Context, EmptySubscription, Schema};
-use game::instance::{Instance, InstancePool};
-use models::{Mutation, Query, };
+use async_graphql::{dataloader::DataLoader, Context, Schema};
+use instance::Instance;
+use models::{AppSchema, Mutation, Query, Subscription};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex, MutexGuard},
+};
+use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 
+use rdkafka::producer::FutureProducer;
 use uroj_common::utils::{Claims, Role as AuthRole};
+use uroj_db::connection::{Conn, PgPool};
 
 pub fn configure_service(cfg: &mut web::ServiceConfig) {
-    cfg.service(handlers::index_playground).service(
-        web::resource("/").route(
-            web::get()
-                .guard(guard::Header("upgrade", "websocket"))
-                .to(handlers::index_ws),
-        ),
-    );
+    cfg.service(handlers::index_playground)
+        .service(handlers::index)
+        .service(
+            web::resource("/").route(
+                web::get()
+                    .guard(guard::Header("upgrade", "websocket"))
+                    .to(handlers::index_ws),
+            ),
+        );
 }
 
-pub fn create_schema_with_context(
-    arc_pool: Arc<Mutex<InstancePool>>,
-) -> Schema<Query, Mutation, EmptySubscription> {
-    Schema::build(Query, Mutation, EmptySubscription)
+pub fn create_schema_with_context(db_pool: PgPool, ins_pool: InstancePool) -> AppSchema {
+    let mux_ins_pool = TokioMutex::new(ins_pool);
+    let kafka_consumer_counter = Mutex::new(0);
+
+    Schema::build(Query, Mutation, Subscription)
         // limits are commented out, because otherwise introspection query won't work
         // .limit_depth(3)
         // .limit_complexity(15)
-        .data(arc_pool)
+        .data(db_pool)
+        .data(mux_ins_pool)
+        .data(kafka::create_producer())
+        .data(kafka_consumer_counter)
         .finish()
+}
+
+pub fn get_conn_from_ctx(ctx: &Context<'_>) -> Conn {
+    ctx.data::<PgPool>()
+        .expect("Can't get pool")
+        .get()
+        .expect("Can't get DB connection")
 }
 
 pub fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
@@ -39,24 +57,23 @@ pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
         .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
 }
 
-pub fn get_instance_pool_from_ctx<'ctx>(ctx: &Context<'ctx>) -> MutexGuard<'ctx, InstancePool> {
-    ctx.data_unchecked::<Arc<Mutex<InstancePool>>>()
-        .lock()
-        .unwrap()
-}
-
-pub fn borrow_instance_from_ctx<'ctx>(
+pub(crate) async fn get_instance_pool_from_ctx<'ctx>(
     ctx: &Context<'ctx>,
-    id: &str,
-) -> Result<&'ctx Instance, String> {
-    ctx.data_unchecked::<Arc<Mutex<InstancePool>>>()
+) -> TokioMutexGuard<'ctx, InstancePool> {
+    ctx.data_unchecked::<TokioMutex<InstancePool>>()
         .lock()
-        .unwrap()
-        .get(id)
-        .ok_or("err".to_string())
+        .await
 }
 
-mod game;
+pub fn get_producer_from_ctx<'ctx>(ctx: &Context<'ctx>) -> &'ctx FutureProducer {
+    ctx.data::<FutureProducer>()
+        .expect("Can't get Kafka producer")
+}
+
+mod instance;
 mod handlers;
+mod kafka;
+mod raw_station;
 mod models;
-mod rpc;
+
+pub type InstancePool = instance::InstancePool;

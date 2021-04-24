@@ -1,86 +1,33 @@
-use async_graphql::*;
-use async_stream::try_stream;
-use futures::Stream;
-use serde::{Deserialize, Serialize};
-use strum_macros::*;
-
-use super::borrow_instance_from_ctx;
+use crate::instance::{{Instance, InstanceConfig, InstanceStatus}, PathBtn, fsm::{GameFrame, GlobalStatus, NodeID}, station::{ButtonKind, StationData}};
+use crate::raw_station::RawStation;
 use crate::{
-    game::{
-        components::{NodeID, SignalStatus},
-        instance::PathBtn,
-    },
-    get_id_from_ctx, get_instance_pool_from_ctx,
+    get_conn_from_ctx, get_instance_pool_from_ctx, get_producer_from_ctx,
+    kafka::{self},
 };
+use async_graphql::*;
+use async_stream::stream;
+use futures::Stream;
+use futures_util::StreamExt;
+use rdkafka::Message;
+use std::{str::FromStr, sync::Mutex};
+use uroj_db::models::instance::Instance as InstanceModel;
 
-#[derive(SimpleObject)]
-pub struct Point {
-    x: f64,
-    y: f64,
-}
-
-#[derive(SimpleObject)]
-pub struct NodeData {
-    pub node_id: usize,
-    pub track_id: String,
-    pub start: Point,
-    pub end: Point,
-    pub start_joint: String, //始端绝缘节
-    pub end_joint: String,   //终端绝缘节
-}
-
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
-pub enum Direction {
-    LeftUp,
-    LeftDown,
-    RightUp,
-    RightDown,
-}
-
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
-pub enum SignalKind {
-    HomeSignal,     //進站信號機
-    StartingSignal, //出站信號機
-    ShuntingSignal, //調車信號機
-}
-
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
-pub enum SignalMounting {
-    PostMounting,   //高柱
-    GroundMounting, //矮柱
-}
-
-#[derive(SimpleObject)]
-pub struct SignalData {
-    pub signal_id: String,
-    pub pos: Point,              //位置
-    pub dir: Direction,          //朝向
-    pub sgn_type: SignalKind,    //信號類型
-    pub sgn_mnt: SignalMounting, //安裝方式
-    pub protect_node_id: usize,  //防护node 的 ID
-}
-
-// front models
-#[derive(SimpleObject)]
-pub struct StationData {
-    pub station_name: String,
-    pub nodes: Vec<NodeData>,
-    pub signals: Vec<SignalData>,
-}
-
-#[derive(SimpleObject)]
-pub struct GlobalStatus {
-    pub nodes: Vec<UpdateNode>,
-    pub signals: Vec<UpdateSignal>,
-}
-
-pub(crate) struct Query;
+use uuid::Uuid;
 
 #[Object]
 impl Query {
     //获取车站布局
     async fn station_layout(&self, ctx: &Context<'_>, id: String) -> Result<StationData> {
-        todo!()
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
+
+        let fsm = instance.fsm.clone();
+        let data = StationData {
+            title: station.title,
+            nodes: (),
+            signals: (),
+        };
+        Ok(data)
     }
 
     //获取全局状态
@@ -89,43 +36,43 @@ impl Query {
     }
 }
 
-#[derive(Union)]
-pub(crate) enum GameFrame {
-    UpdateSignal(UpdateSignal),
-    UpdateNode(UpdateNode),
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Enum, Display, EnumString)]
-#[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum NodeStatus {
-    Lock,
-    Vacant,
-    Occupied,
-}
-
-#[derive(SimpleObject, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct UpdateSignal {
-    pub(crate) id: String,
-    state: SignalStatus,
-}
-
-#[derive(SimpleObject, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct UpdateNode {
-    id: NodeID,
-    state: NodeStatus,
-}
-
-pub struct Mutation;
-
 #[Object]
 impl Mutation {
+    //运行
+    async fn run(&self, ctx: &Context<'_>, id: String) -> Result<String> {
+        let uuid = Uuid::from_str(&id)?;
+        let conn = get_conn_from_ctx(ctx);
+        let data = InstanceModel::find_one(uuid, &conn)?;
+        let cfg = InstanceConfig {
+            id: data.id.to_string(),
+            title: data.title.clone(),
+            player: data.player.clone(),
+            token: data.token.clone(),
+            station: RawStation::from_yaml(&data.yaml)?,
+        };
+        let mut pool = get_instance_pool_from_ctx(ctx).await;
+        if pool.contains_key(&cfg.id) {
+            return Err(format!("instance {} is already running", cfg.id).into());
+        }
+        let instance = Instance::new(&cfg)?;
+        pool.insert(cfg.id.clone(), instance);
+
+        data.update_state(InstanceStatus::Playing.to_string(), &conn)?;
+
+        Ok(cfg.id)
+    }
+
     //结束
     async fn stop(&self, ctx: &Context<'_>, id: String) -> Result<String> {
-        let mut instance = get_instance_pool_from_ctx(ctx);
-        match instance.remove(&id) {
-            Some(i) => Ok(i.info.id),
-            None => Err(format!("not found instance {}", id).into()),
-        }
+        let mut instances = get_instance_pool_from_ctx(ctx).await;
+        let ins = instances
+            .remove(&id)
+            .ok_or(format!("not found instance {}", id))?;
+        let uuid = Uuid::from_str(&id)?;
+        let conn = get_conn_from_ctx(ctx);
+        InstanceModel::find_one(uuid, &conn)?
+            .update_state(InstanceStatus::Finished.to_string(), &conn)?;
+        Ok(id)
     }
 
     //創建進路
@@ -135,7 +82,8 @@ impl Mutation {
         id: String,
         input: CreateRouteInput,
     ) -> Result<String> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
 
         let start = PathBtn {
             id: input.start_sgn,
@@ -150,7 +98,8 @@ impl Mutation {
             },
         };
 
-        instance.create_path(start, end)?;
+        let producer = get_producer_from_ctx(ctx);
+        instance.create_path(start, end, producer).await?;
 
         Ok(id)
     }
@@ -162,14 +111,16 @@ impl Mutation {
         id: String,
         input: CancelRouteInput,
     ) -> Result<String> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
 
         let start = PathBtn {
             id: input.start_sgn,
             kind: input.start_btn,
         };
 
-        instance.cancel_path(start).await?;
+        let producer = get_producer_from_ctx(ctx);
+        instance.cancel_path(start, producer).await?;
         Ok(id)
     }
 
@@ -180,20 +131,23 @@ impl Mutation {
         id: String,
         input: CancelRouteInput,
     ) -> Result<String> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
 
         let start = PathBtn {
             id: input.start_sgn,
             kind: input.start_btn,
         };
 
-        instance.cancel_path(start).await?;
+        let producer = get_producer_from_ctx(ctx);
+        instance.cancel_path(start, producer).await?;
         Ok(id)
     }
 
     //區間故障解鎖
     async fn fault_unlock(&self, ctx: &Context<'_>, id: String, node: NodeID) -> Result<String> {
-        let instance = borrow_instance_from_ctx(ctx, &id)?;
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
         // instance.create_path();
 
         Ok(id)
@@ -216,26 +170,41 @@ struct CancelRouteInput {
     start_sgn: String,
 }
 
-// pub struct Subscription;
+#[Subscription]
+impl Subscription {
+    async fn game_update<'ctx>(
+        &self,
+        ctx: &'ctx Context<'_>,
+        id: String,
+    ) -> Result<impl Stream<Item = GameFrame>> {
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
+        let kafka_consumer_counter = ctx
+            .data::<Mutex<i32>>()
+            .expect("Can't get Kafka consumer counter");
+        let consumer_group_id = kafka::get_kafka_consumer_group_id(kafka_consumer_counter);
+        let consumer = kafka::create_consumer(consumer_group_id);
 
-// #[Subscription]
-// impl Subscription {
-//     async fn game_update<'ctx>(
-//         &self,
-//         ctx: &'ctx Context<'_>,
-//         id: String,
-//     ) -> impl Stream<Item = Result<GameFrame>> + 'ctx {
-//         todo!()
-//     }
-// }
+        Ok(stream! {
+            let mut stream = consumer.stream();
 
-#[derive(Enum, Copy, Clone, Eq, PartialEq)]
-pub enum ButtonKind {
-    Pass,  //通過按鈕
-    Shunt, //調車按鈕
-    Train, //列車按鈕（接發車）
-    Guide, //引導按鈕
-    LZA,   //列車終端按鈕
+            while let Some(value) = stream.next().await {
+                yield match value {
+                    Ok(message) => {
+                        let payload = message.payload().expect("Kafka message should contain payload");
+                        let message = String::from_utf8_lossy(payload).to_string();
+                        serde_json::from_str(&message).expect("Can't deserialize a frame")
+                    }
+                    Err(e) => panic!("Error while Kafka message processing: {}", e)
+                };
+            }
+        })
+    }
 }
 
-pub type AppSchema = Schema<Query, EmptyMutation, EmptySubscription>;
+pub struct Subscription;
+
+pub struct Mutation;
+
+pub struct Query;
+pub type AppSchema = Schema<Query, Mutation, Subscription>;

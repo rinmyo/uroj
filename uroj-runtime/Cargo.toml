@@ -10,7 +10,6 @@ edition = "2018"
 chrono = "0.4"
 tokio = { version = "1", features = ["full"] }
 tokio-serde = { version = "0.8", features = ["json"] }
-tarpc = { version = "0.26", features = ["full"] }
 petgraph = "*"
 serde="1"
 actix-web = "3"
@@ -21,6 +20,14 @@ strum = "0"
 strum_macros = "0"
 futures = "0"
 dotenv = "0"
+serde_json = ""
+rdkafka = { version = "0", features = ["cmake-build"] }
+lazy_static = ""
+uuid = ""
+serde_yaml = "0.8"
 
 [dependencies.uroj-common]
 path = "../uroj-common"
+
+[dependencies.uroj-db]
+path = "../uroj-db"

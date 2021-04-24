@@ -4,15 +4,11 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_graphql::{async_trait, dataloader::Loader, guard::Guard, Context, Object, Result};
 use async_graphql::{EmptySubscription, Error, Schema};
-use chrono::Utc;
-use tarpc::context;
 use uroj_common::{
-    rpc::{self, InstanceConfig},
     utils::{Claims, Role as AuthRole},
 };
 use uroj_db::connection::PgPool;
 use uroj_db::models::class::Class as ClassData;
-use uroj_db::models::executor::Executor as ExecutorData;
 use uroj_db::models::instance::{Instance as InstanceData, NewInstance as NewInstanceData};
 use uroj_db::models::station::{NewStation as NewStationData, Station as StationData};
 use uroj_db::models::user::User as UserData;
@@ -23,7 +19,7 @@ use user::User;
 use station::Station;
 use uuid::Uuid;
 
-use crate::{get_client, get_conn_from_ctx, get_random_token};
+use crate::{get_conn_from_ctx, get_random_token};
 
 use self::{
     instance::{Instance, InstanceInput, InstanceStatus},
@@ -118,32 +114,6 @@ impl Mutation {
 
         let created_instance = &new_instance.create(&conn)?;
         Ok(created_instance.into())
-    }
-
-    async fn start_instance(&self, ctx: &Context<'_>, id: String) -> Result<String> {
-        let user_id = get_id_from_ctx(ctx).ok_or("Invalid token")?;
-        let conn = get_conn_from_ctx(ctx);
-        let uuid = Uuid::from_str(&id)?;
-        let ins = InstanceData::find_one(uuid, &conn)?;
-        //time bound
-        if Utc::now().naive_local() < ins.begin_at {
-            return Err(format!("instance {} cannot be initialized yet", id).into());
-        }
-
-        let addr = ExecutorData::find_one(ins.executor_id, &conn)?.addr;
-        let cfg = InstanceConfig {
-            id: ins.id.to_string(),
-            title: ins.title,
-            player: ins.player,
-            token: ins.token,
-            station: rpc::Station::from_yaml(&ins.yaml)?,
-        };
-        let title = get_client(&addr)
-            .await?
-            .run_instance(context::current(), cfg)
-            .await?;
-
-        title.map_err(|e| e.into())
     }
 }
 

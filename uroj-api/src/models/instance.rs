@@ -52,13 +52,13 @@ pub(crate) struct InstanceInput {
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Enum, Display, EnumString)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum InstanceStatus {
-    Uninitialized,
-    Playing,
-    Finished,
+    Prestart, //启动前
+    Playing,  //使用中
+    Finished, //已结束
 }
 
 impl Default for InstanceStatus {
     fn default() -> Self {
-        InstanceStatus::Uninitialized
+        InstanceStatus::Prestart
     }
 }

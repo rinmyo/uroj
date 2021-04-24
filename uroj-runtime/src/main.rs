@@ -1,15 +1,16 @@
 use actix_web::{App, HttpServer};
 use dotenv::dotenv;
-use uroj_runtime::{create_schema_with_context, run_rpc_server};
+use uroj_db::{connection::create_connection_pool, run_migrations};
+use uroj_runtime::{configure_service, create_schema_with_context, InstancePool};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
 
-    let pool = Arc::new(Mutex::new(InstancePool::new()));
-    tokio::spawn(async { run_rpc_server(2334, Arc::clone(pool)).await });
-
-    let schema = create_schema_with_context(Arc::clone(pool));
+    let ins_pool = InstancePool::new();
+    let db_pool = create_connection_pool();
+    run_migrations(&db_pool);
+    let schema = create_schema_with_context(db_pool, ins_pool);
 
     HttpServer::new(move || App::new().configure(configure_service).data(schema.clone()))
         .bind("0.0.0.0:8003")?
