@@ -1,8 +1,11 @@
 use std::time::Duration;
 
+use super::{
+    fsm::{GameFrame, MoveTrain, NodeID, NodeStatus},
+    Instance,
+};
+use crate::raw_station::RawDirection;
 use tokio::time::sleep;
-
-use super::{Instance, fsm::{Direction, GameFrame, MoveTrain, NodeID, NodeStatus}};
 
 type TrainID = usize;
 
@@ -24,11 +27,11 @@ impl Train {
     }
 
     //when node state is changed, call me
-    pub(crate) async fn can_move_to(&self, target: &NodeID, ins: &Instance) -> bool {
+    pub(crate) async fn can_move_to(&self, target: NodeID, ins: &Instance) -> bool {
         let arc_fsm = ins.fsm.clone();
         let fsm = arc_fsm.lock().await;
         let graph = &ins.graph;
-        let curr = &self.curr_node();
+        let curr = self.curr_node();
         //鄰接保證物理上車可以移動
         //行车方向
         let dir = graph.direction(curr, target);
@@ -37,10 +40,10 @@ impl Train {
         }
         //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
 
-        let target_node = fsm.node(*target);
+        let target_node = fsm.node(target);
         let pro_sgn_id = match dir.unwrap() {
-            Direction::Left => target_node.right_sgn_id.as_ref(),
-            Direction::Right => target_node.left_sgn_id.as_ref(),
+            RawDirection::Left => target_node.right_sgn_id.as_ref(),
+            RawDirection::Right => target_node.left_sgn_id.as_ref(),
         };
 
         pro_sgn_id.map_or(true, |s| fsm.sgn(&s).is_allowed())
@@ -63,11 +66,11 @@ impl Train {
     }
 
     //when node state is changed, call me
-    pub(crate) async fn try_move_to(&self, target: &NodeID, ins: &Instance) -> Option<GameFrame> {
+    pub(crate) async fn try_move_to(&self, target: NodeID, ins: &Instance) -> Option<GameFrame> {
         if self.can_move_to(target, ins).await {
             return Some(GameFrame::MoveTrain(MoveTrain {
                 id: self.id,
-                node_id: *target,
+                node_id: target,
                 process: 0.,
             }));
         }

@@ -3,17 +3,17 @@
 // 2. パースの点たちは相互にS関係がないこと
 // 3. パースの点はLOCKでもUSEでもいけないこと
 
-use crate::raw_station::RawNode;
+use crate::raw_station::{RawNode, RawDirection};
 use petgraph::{
     algo,
     graphmap::{DiGraphMap, UnGraphMap},
 };
 
-use super::fsm::{Direction, NodeID};
+use super::fsm::{NodeID};
 
 //站場圖
 pub(crate) struct StationGraph {
-    pub(crate) r_graph: DiGraphMap<NodeID, Direction>,
+    pub(crate) r_graph: DiGraphMap<NodeID, RawDirection>,
     pub(crate) s_graph: UnGraphMap<NodeID, ()>,
     // b_graph: UnGraphMap<NodeID, ()>,
 }
@@ -26,10 +26,10 @@ impl StationGraph {
 
         data.iter().for_each(|n| {
             for i in &n.left_adj {
-                r_graph.add_edge(n.id, *i, Direction::Left);
+                r_graph.add_edge(n.id, *i, RawDirection::Left);
             }
             for i in &n.right_adj {
-                r_graph.add_edge(n.id, *i, Direction::Right);
+                r_graph.add_edge(n.id, *i, RawDirection::Right);
             }
             for i in &n.conflicted_nodes {
                 s_graph.add_edge(n.id, *i, ());
@@ -48,7 +48,7 @@ impl StationGraph {
         &self,
         start: NodeID,
         goal: NodeID,
-    ) -> Option<(Vec<NodeID>, Direction)> {
+    ) -> Option<(Vec<NodeID>, RawDirection)> {
         if start == goal {
             return None;
         }
@@ -69,9 +69,9 @@ impl StationGraph {
         Some((maybe_path, dir))
     }
 
-    pub(crate) fn direction(&self, from: &NodeID, to: &NodeID) -> Option<Direction> {
+    pub(crate) fn direction(&self, from: NodeID, to: NodeID) -> Option<RawDirection> {
         self.r_graph
-            .edge_weight(from.clone(), to.clone())
+            .edge_weight(from, to)
             .map(|d| d.clone())
     }
 }

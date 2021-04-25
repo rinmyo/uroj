@@ -1,6 +1,6 @@
+use async_graphql::*;
 use serde::{Deserialize, Serialize};
 use strum_macros::*;
-use async_graphql::*;
 
 #[derive(Eq, PartialEq, Deserialize, Serialize, Debug, Clone, Enum, Copy)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -28,23 +28,39 @@ pub(crate) enum ButtonKind {
 
 #[derive(Deserialize, Serialize, Debug, Enum, Copy, Clone, Eq, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum Direction {
-    LeftUp,
-    LeftDown,
-    RightUp,
-    RightDown,
+pub(crate) enum NodeSide {
+    Upper,
+    Under,
 }
+
+#[derive(Deserialize, Serialize, Debug, Enum, Copy, Clone, Eq, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum Direction {
+    Left,
+    Right,
+}
+
+impl Direction {
+    pub(crate) fn reverse(&self) -> Self {
+        match self {
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+        }
+    }
+}
+
 
 #[derive(Deserialize, Serialize, Debug)]
 pub(crate) struct Signal {
     pub(crate) id: String,
     pub(crate) pos: Option<(f64, f64)>, //位置 渲染用
-    pub(crate) dir: Direction,           // 上下朝向 渲染
+    pub(crate) side: NodeSide,          // 上下朝向 渲染
+    pub(crate) dir: Option<Direction>,
     pub(crate) sgn_kind: SignalKind,    //信號類型 渲染用
     pub(crate) sgn_mnt: SignalMounting, //安裝方式 渲染用
     pub(crate) protect_node_id: usize,  //防护node 的 ID 业务&渲染，防护node指的是其所防护的node
     pub(crate) toward_node_id: usize,
-    pub(crate) btns: Vec<ButtonKind>, //按钮
+    pub(crate) btns: Vec<ButtonKind>,   //按钮
     pub(crate) jux_sgn: Option<String>, //并置信號機
     pub(crate) dif_sgn: Option<String>, //差置信号机
 }
@@ -72,9 +88,9 @@ pub(crate) struct Node {
     pub(crate) id: usize,
     pub(crate) node_kind: NodeKind,
     pub(crate) turnout_id: Vec<usize>, //无岔區段則空，len即为包含道岔数，通過計算得出岔心
-    pub(crate) track_id: String,       //所属軌道電路， 用於構建 B 關係，特殊區段（接近、 離去）通過id識別
-    pub(crate) left_adj: Vec<usize>,   //左鄰 用於構建 R 關係
-    pub(crate) right_adj: Vec<usize>,  //右鄰 用於構建 R 關係
+    pub(crate) track_id: String, //所属軌道電路， 用於構建 B 關係，特殊區段（接近、 離去）通過id識別
+    pub(crate) left_adj: Vec<usize>, //左鄰 用於構建 R 關係
+    pub(crate) right_adj: Vec<usize>, //右鄰 用於構建 R 關係
     pub(crate) conflicted_nodes: Vec<usize>, //牴觸節點, 用於構建 S 關係
     pub(crate) line: ((f64, f64), (f64, f64)), //綫段，用於渲染
     pub(crate) joint: (JointKind, JointKind), //兩端是否有絕緣節，用於渲染
@@ -111,7 +127,10 @@ pub(crate) type RawSignalMounting = SignalMounting;
 pub(crate) type RawButtonKind = ButtonKind;
 pub(crate) type RawJointKind = JointKind;
 pub(crate) type RawNodeKind = NodeKind;
+pub(crate) type RawNodeSide = NodeSide;
 pub(crate) type RawDirection = Direction;
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

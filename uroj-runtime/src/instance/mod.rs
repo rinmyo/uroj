@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::raw_station::{RawSignalKind, RawStation};
+use crate::raw_station::{RawDirection, RawSignalKind, RawStation};
 
 use self::fsm::*;
 use self::graph::StationGraph;
@@ -40,29 +40,42 @@ impl Instance {
         let graph = StationGraph::new(nodes);
 
         //創建fsm
-        let fsm_sgns: HashMap<String, Signal> =
+        let mut fsm_sgns: HashMap<String, Signal> =
             signals.iter().map(|s| (s.id.clone(), s.into())).collect();
         let mut fsm_nodes: HashMap<NodeID, Node> = nodes.iter().map(|n| (n.id, n.into())).collect();
         let mut stn_sgns: HashMap<_, SignalData> =
             signals.iter().map(|s| (s.id.clone(), s.into())).collect();
         let stn_nodes: HashMap<_, NodeData> = nodes.iter().map(|n| (n.id, n.into())).collect();
 
+        //需要配置stn_sgn 的 dir 和 pos 缺省
+        //需要配置fsm_node的left和right，
+        //fsm_sgn的dir缺省
         for s in signals {
             let pid = s.protect_node_id;
+            let tid = s.toward_node_id;
+
+            let dir = graph
+                .direction(pid, tid)
+                .or(s.dir.into())
+                .ok_or(format!("invalid signal {}", s.id))?;
 
             let stn_sgn = stn_sgns.get_mut(&s.id).unwrap();
+            let fsm_sgn = fsm_sgns.get_mut(&s.id).unwrap();
+
             let p_node = fsm_nodes
                 .get_mut(&pid)
                 .ok_or(format!("unknown node id: {}", pid))?;
-            let p_node_stn = stn_nodes.get(&p_node.node_id).ok_or("fuck you bro")?;
+            let p_node_stn = stn_nodes.get(&pid).ok_or("fuck you bro")?;
 
             //對信號機進行所屬
-            match stn_sgn.dir.into() {
-                Direction::Left => {
+            fsm_sgn.dir = dir;
+            stn_sgn.dir = dir;
+            match dir {
+                RawDirection::Left => {
                     stn_sgn.pos = p_node_stn.left_p.clone();
                     p_node.left_sgn_id = Some(s.id.clone());
                 }
-                Direction::Right => {
+                RawDirection::Right => {
                     stn_sgn.pos = p_node_stn.right_p.clone();
                     p_node.right_sgn_id = Some(s.id.clone());
                 }
@@ -125,7 +138,7 @@ impl Instance {
             .get(&start.id)
             .ok_or(format!("unknown signal id: {}", &start.id))?;
 
-        let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.direction.reverse());
+        let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.dir.reverse());
         //這裏的方向是根據用戶輸入判斷的朝向，和最終尋到的路徑的前後朝向做判斷
         //使用按鈕類型判斷進路類型
         let (mut is_pass, mut is_send, mut is_recv, mut is_shnt) = (false, false, false, false);
@@ -138,7 +151,7 @@ impl Instance {
                     .sgns
                     .get(&end.id)
                     .ok_or(format!("unknown signal id: {}", &end.id))?;
-                (end_sgn.toward_node_id, end_sgn.direction.clone())
+                (end_sgn.toward_node_id, end_sgn.dir.clone())
             }
             //通過按鈕 -> 列車終端按鈕 = 通過進路
             (ButtonKind::Pass, ButtonKind::LZA) => {
@@ -161,12 +174,12 @@ impl Instance {
                     //進站信號機 -> 出戰信號機 => 接車進路
                     (RawSignalKind::HomeSignal, RawSignalKind::StartingSignal) => {
                         is_recv = true;
-                        (end_sgn.toward_node_id, end_sgn.direction.clone())
+                        (end_sgn.toward_node_id, end_sgn.dir.clone())
                     }
                     //出站信號機 -> 進站信號機 => 發車進路
                     (RawSignalKind::StartingSignal, RawSignalKind::HomeSignal) => {
                         is_send = true;
-                        (end_sgn.protect_node_id, end_sgn.direction.clone())
+                        (end_sgn.protect_node_id, end_sgn.dir.clone())
                     }
                     _ => return Err("no route found".to_string()),
                 }
@@ -203,7 +216,7 @@ impl Instance {
                     .get(end_id)
                     .ok_or(format!("unknown signal id: {}", end_id))?;
 
-                (end_sgn.toward_node_id, end_sgn.direction.reverse())
+                (end_sgn.toward_node_id, end_sgn.dir.reverse())
             }
             _ => return Err("no route found".to_string()),
         };
@@ -234,8 +247,8 @@ impl Instance {
             }
 
             let sgn = match dir {
-                Direction::Left => node.right_sgn_id.clone(),
-                Direction::Right => node.left_sgn_id.clone(),
+                RawDirection::Left => node.right_sgn_id.clone(),
+                RawDirection::Right => node.left_sgn_id.clone(),
             };
             if let Some(sgn) = sgn {
                 sgn_id.push(sgn);
@@ -297,7 +310,7 @@ impl Instance {
             .sgns
             .get(&start.id)
             .ok_or(format!("unknown signal id: {}", &start.id))?;
-        let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.direction.reverse());
+        let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.dir.reverse());
 
         let maybe_route = self
             .find_a_route(start_node, &start_dir)
@@ -315,8 +328,8 @@ impl Instance {
                 });
 
                 let sgn_id = match start_dir {
-                    Direction::Left => &fsm.node(n).right_sgn_id,
-                    Direction::Right => &fsm.node(n).left_sgn_id,
+                    RawDirection::Left => &fsm.node(n).right_sgn_id,
+                    RawDirection::Right => &fsm.node(n).left_sgn_id,
                 };
 
                 if let Some(sgn_id) = sgn_id {
@@ -333,7 +346,7 @@ impl Instance {
         Ok(())
     }
 
-    async fn find_a_route(&self, nid: NodeID, dir: &Direction) -> Option<Vec<NodeID>> {
+    async fn find_a_route(&self, nid: NodeID, dir: &RawDirection) -> Option<Vec<NodeID>> {
         let arc_fsm = self.fsm.clone();
         let fsm = arc_fsm.lock().await;
         let curr = fsm.node(nid);
@@ -350,7 +363,7 @@ impl Instance {
     pub(crate) async fn next_route_node(
         &self,
         start_node: NodeID,
-        dir: &Direction,
+        dir: &RawDirection,
     ) -> Option<NodeID> {
         let arc_fsm = self.fsm.clone();
         let fsm = arc_fsm.lock().await;

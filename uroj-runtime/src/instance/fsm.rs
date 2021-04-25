@@ -1,6 +1,5 @@
 use std::{collections::HashMap, time::Duration};
 
-use super::graph::StationGraph;
 use crate::{kafka::send_message, raw_station::*};
 use async_graphql::*;
 use rdkafka::producer::FutureProducer;
@@ -105,14 +104,14 @@ impl Default for NodeStatus {
 }
 
 pub(crate) struct Signal {
-    pub(crate) signal_id: String,
+    pub(crate) id: String,
     pub(crate) filament_status: (FilamentStatus, FilamentStatus),
     pub(crate) state: SignalStatus,
     pub(crate) used_flag: bool,     //征用
     pub(crate) kind: RawSignalKind, //因为逻辑不需要变化
     pub(crate) protect_node_id: NodeID,
     pub(crate) toward_node_id: NodeID,
-    pub(crate) direction: Direction, //朝向
+    pub(crate) dir: Direction, //朝向
 }
 
 impl From<&RawSignal> for Signal {
@@ -129,14 +128,14 @@ impl From<&RawSignal> for Signal {
         };
 
         Signal {
-            signal_id: data.id.clone(),
+            id: data.id.clone(),
             filament_status: filament_status,
             state: state,
             used_flag: false,
             kind: data.sgn_kind,
             protect_node_id: data.protect_node_id,
             toward_node_id: data.toward_node_id,
-            direction: data.dir.into(),
+            dir: Direction::Left, //缺省
         }
     }
 }
@@ -160,7 +159,7 @@ impl Signal {
         self.state = state;
 
         GameFrame::UpdateSignal(UpdateSignal {
-            id: self.signal_id.clone(),
+            id: self.id.clone(),
             state: state,
         })
         .send_via(producer)
@@ -230,30 +229,6 @@ pub(crate) enum FilamentStatus {
 impl Default for FilamentStatus {
     fn default() -> Self {
         FilamentStatus::Normal
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) enum Direction {
-    Left,
-    Right,
-}
-
-impl Direction {
-    pub(crate) fn reverse(&self) -> Self {
-        match self {
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
-        }
-    }
-}
-
-impl From<RawDirection> for Direction {
-    fn from(d: RawDirection) -> Self {
-        match d {
-            RawDirection::LeftUp | RawDirection::LeftDown => Direction::Left,
-            RawDirection::RightUp | RawDirection::RightDown => Direction::Right,
-        }
     }
 }
 

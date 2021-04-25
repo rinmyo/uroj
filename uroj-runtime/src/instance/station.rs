@@ -1,6 +1,4 @@
-use crate::raw_station::{RawDirection, RawSignal, RawSignalKind, RawSignalMounting};
-
-use crate::raw_station::RawNode;
+use crate::raw_station::*;
 use async_graphql::*;
 
 use super::fsm::NodeID;
@@ -26,8 +24,8 @@ pub(crate) struct NodeData {
     pub(crate) track_id: String,
     pub(crate) left_p: Point,
     pub(crate) right_p: Point,
-    pub(crate) left_joint: String, //始端绝缘节
-    pub(crate) right_joint: String,   //终端绝缘节
+    pub(crate) left_joint: String,  //始端绝缘节
+    pub(crate) right_joint: String, //终端绝缘节
 }
 
 impl From<&RawNode> for NodeData {
@@ -49,7 +47,8 @@ pub(crate) struct SignalData {
     pub(crate) sgn_type: RawSignalKind,    //信號類型
     pub(crate) sgn_mnt: RawSignalMounting, //安裝方式
     pub(crate) protect_node_id: NodeID,    //防护node 的 ID
-    pub(crate) dir: RawDirection,             //
+    pub(crate) side: RawNodeSide,
+    pub(crate) dir: RawDirection, //
     pub(crate) pos: Point,
 }
 
@@ -61,7 +60,8 @@ impl From<&RawSignal> for SignalData {
             sgn_type: sgn.sgn_kind,
             sgn_mnt: sgn.sgn_mnt,
             protect_node_id: sgn.protect_node_id,
-            dir: sgn.dir,
+            side: sgn.side,
+            dir: RawDirection::Left,  //缺省，需要更新
             pos: Point::from((0, 0)), //缺省，需要更新
         }
     }
