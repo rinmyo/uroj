@@ -10,14 +10,14 @@ use tokio::time::sleep;
 type TrainID = usize;
 
 pub(crate) struct Train {
-    id: TrainID,
+    pub(crate) id: TrainID,
     past_node: Vec<NodeID>,
 }
 
 impl Train {
-    pub(crate) fn new(spawn_at: NodeID, id_fn: fn() -> TrainID) -> Self {
+    pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Self {
         Train {
-            id: id_fn(),
+            id: id,
             past_node: vec![spawn_at],
         }
     }

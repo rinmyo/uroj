@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::raw_station::{RawDirection, RawSignalKind, RawStation};
 
-use self::fsm::*;
+use self::{fsm::*, station::Point};
 use self::graph::StationGraph;
 use self::station::{ButtonKind, NodeData, SignalData, StationData};
 use self::train::Train;
@@ -377,6 +377,12 @@ impl Instance {
             }
         }
         None
+    }
+
+    pub(crate) async fn spawn_train(&mut self, node: NodeID) {
+        let id = self.trains.len()+ 1;
+        let new_train = Train::new(node, id);
+        self.trains.push(new_train);
     }
 }
 

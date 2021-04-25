@@ -1,4 +1,8 @@
-use crate::instance::{{Instance, InstanceConfig, InstanceStatus}, PathBtn, fsm::{GameFrame, GlobalStatus, NodeID}, station::{ButtonKind, StationData}};
+use crate::instance::{
+    fsm::{GameFrame, GlobalStatus, NodeID},
+    station::{ButtonKind, StationData},
+    PathBtn, {Instance, InstanceConfig, InstanceStatus},
+};
 use crate::raw_station::RawStation;
 use crate::{
     get_conn_from_ctx, get_instance_pool_from_ctx, get_producer_from_ctx,
@@ -67,6 +71,16 @@ impl Mutation {
         InstanceModel::find_one(uuid, &conn)?
             .update_state(InstanceStatus::Finished.to_string(), &conn)?;
         Ok(id)
+    }
+
+    async fn spawn_train(&self, ctx: &Context<'_>, id: String, at: NodeID) -> Result<usize> {
+        let mut instances = get_instance_pool_from_ctx(ctx).await;
+        let ins = instances
+            .get_mut(&id)
+            .ok_or(format!("not found instance {}", id))?;
+        ins.spawn_train(at).await;
+        
+        Ok(at)
     }
 
     //創建進路
