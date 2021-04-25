@@ -1,7 +1,7 @@
-pub mod fsm;
-pub mod graph;
-pub mod station;
-pub mod train;
+pub(crate) mod fsm;
+pub(crate) mod graph;
+pub(crate) mod station;
+pub(crate) mod train;
 
 use rdkafka::producer::FutureProducer;
 use std::{collections::HashMap, sync::Arc};
@@ -14,7 +14,7 @@ use crate::raw_station::{RawSignalKind, RawStation};
 
 use self::fsm::*;
 use self::graph::StationGraph;
-use self::station::{ButtonKind, StationData};
+use self::station::{ButtonKind, NodeData, SignalData, StationData};
 use self::train::Train;
 
 pub struct Instance {
@@ -38,7 +38,47 @@ impl Instance {
         let nodes = &cfg.station.nodes;
 
         let graph = StationGraph::new(nodes);
-        let fsm = InstanceFSM::new(signals, nodes, &graph)?;
+
+        //創建fsm
+        let fsm_sgns: HashMap<String, Signal> =
+            signals.iter().map(|s| (s.id.clone(), s.into())).collect();
+        let mut fsm_nodes: HashMap<NodeID, Node> = nodes.iter().map(|n| (n.id, n.into())).collect();
+        let mut stn_sgns: HashMap<_, SignalData> =
+            signals.iter().map(|s| (s.id.clone(), s.into())).collect();
+        let stn_nodes: HashMap<_, NodeData> = nodes.iter().map(|n| (n.id, n.into())).collect();
+
+        for s in signals {
+            let pid = s.protect_node_id;
+
+            let stn_sgn = stn_sgns.get_mut(&s.id).unwrap();
+            let p_node = fsm_nodes
+                .get_mut(&pid)
+                .ok_or(format!("unknown node id: {}", pid))?;
+            let p_node_stn = stn_nodes.get(&p_node.node_id).ok_or("fuck you bro")?;
+
+            //對信號機進行所屬
+            match stn_sgn.dir.into() {
+                Direction::Left => {
+                    stn_sgn.pos = p_node_stn.left_p.clone();
+                    p_node.left_sgn_id = Some(s.id.clone());
+                }
+                Direction::Right => {
+                    stn_sgn.pos = p_node_stn.right_p.clone();
+                    p_node.right_sgn_id = Some(s.id.clone());
+                }
+            }
+        }
+
+        let station = StationData {
+            title: cfg.station.title.clone(),
+            nodes: stn_nodes.values().cloned().collect(),
+            signals: stn_sgns.values().cloned().collect(),
+        };
+
+        let fsm = InstanceFSM {
+            sgns: fsm_sgns,
+            nodes: fsm_nodes,
+        };
 
         let jux_relation = signals
             .iter()
@@ -56,8 +96,6 @@ impl Instance {
             .iter()
             .map(|b| (b.id.clone(), b.protect_node_id))
             .collect();
-
-        let station = StationData::new(&nodes, &signals, &fsm, &cfg.title)?;
 
         Ok(Instance {
             fsm: Arc::new(Mutex::new(fsm)),
@@ -330,16 +368,16 @@ impl Instance {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct InstanceConfig {
-    pub id: String,
-    pub title: String,
-    pub player: String,
-    pub station: RawStation,
-    pub token: String,
+pub(crate) struct InstanceConfig {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) player: String,
+    pub(crate) station: RawStation,
+    pub(crate) token: String,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub enum InstanceData {
+pub(crate) enum InstanceData {
     Exam { exam_id: String },
     Chain,
     Exercise,
@@ -347,7 +385,7 @@ pub enum InstanceData {
 
 #[derive(Eq, PartialEq, Display, EnumString)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
-pub enum InstanceStatus {
+pub(crate) enum InstanceStatus {
     Prestart, //启动前
     Playing,  //使用中
     Finished, //已结束

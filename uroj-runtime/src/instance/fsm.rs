@@ -15,47 +15,6 @@ pub(crate) struct InstanceFSM {
 }
 
 impl InstanceFSM {
-    pub(crate) fn new(
-        sgn_vec: &Vec<RawSignal>,
-        node_vec: &Vec<RawNode>,
-        graph: &StationGraph,
-    ) -> Result<InstanceFSM, String> {
-        let mut sgns: HashMap<String, Signal> =
-            sgn_vec.iter().map(|s| (s.id.clone(), s.into())).collect();
-        let mut nodes: HashMap<NodeID, Node> = node_vec.iter().map(|n| (n.id, n.into())).collect();
-
-        for s in sgn_vec {
-            let pid = s.protect_node_id;
-            let tid = s.toward_node_id;
-
-            let dir = graph
-                .direction(&pid, &tid)
-                .or_else(|| match s.is_left {
-                    Some(true) => Some(Direction::Left),
-                    Some(false) => Some(Direction::Right),
-                    None => None,
-                })
-                .ok_or(format!("connot parse the direction of signal {}", s.id))?;
-
-            let sgn = sgns.get_mut(&s.id).unwrap();
-            (*sgn).direction = dir.clone();
-
-            let p_node = nodes
-                .get_mut(&pid)
-                .ok_or(format!("unknown node id: {}", pid))?;
-
-            match dir {
-                Direction::Left => (*p_node).left_sgn_id = Some(s.id.clone()),
-                Direction::Right => (*p_node).right_sgn_id = Some(s.id.clone()),
-            }
-        }
-
-        Ok(InstanceFSM {
-            sgns: sgns,
-            nodes: nodes,
-        })
-    }
-
     pub(crate) fn node_mut(&mut self, id: NodeID) -> &mut Node {
         self.nodes.get_mut(&id).expect("cannot get node")
     }
@@ -121,8 +80,8 @@ impl From<&RawNode> for Node {
             state: Default::default(),
             once_occ: false,
             is_lock: false,
-            left_sgn_id: None,
-            right_sgn_id: None,
+            left_sgn_id: None,  //先缺省，之後推斷
+            right_sgn_id: None, //先缺省之後推斷
             kind: data.node_kind.clone(),
         }
     }
@@ -151,8 +110,8 @@ pub(crate) struct Signal {
     pub(crate) state: SignalStatus,
     pub(crate) used_flag: bool,     //征用
     pub(crate) kind: RawSignalKind, //因为逻辑不需要变化
-    pub(crate) toward_node_id: NodeID,
     pub(crate) protect_node_id: NodeID,
+    pub(crate) toward_node_id: NodeID,
     pub(crate) direction: Direction, //朝向
 }
 
@@ -175,9 +134,9 @@ impl From<&RawSignal> for Signal {
             state: state,
             used_flag: false,
             kind: data.sgn_kind,
-            toward_node_id: data.toward_node_id,
             protect_node_id: data.protect_node_id,
-            direction: Direction::Left,
+            toward_node_id: data.toward_node_id,
+            direction: data.dir.into(),
         }
     }
 }
@@ -285,6 +244,15 @@ impl Direction {
         match self {
             Direction::Left => Direction::Right,
             Direction::Right => Direction::Left,
+        }
+    }
+}
+
+impl From<RawDirection> for Direction {
+    fn from(d: RawDirection) -> Self {
+        match d {
+            RawDirection::LeftUp | RawDirection::LeftDown => Direction::Left,
+            RawDirection::RightUp | RawDirection::RightDown => Direction::Right,
         }
     }
 }

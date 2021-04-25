@@ -39,20 +39,20 @@ pub fn create_schema_with_context(db_pool: PgPool, ins_pool: InstancePool) -> Ap
         .finish()
 }
 
-pub fn get_conn_from_ctx(ctx: &Context<'_>) -> Conn {
+pub(crate) fn get_conn_from_ctx(ctx: &Context<'_>) -> Conn {
     ctx.data::<PgPool>()
         .expect("Can't get pool")
         .get()
         .expect("Can't get DB connection")
 }
 
-pub fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
+pub(crate) fn get_id_from_ctx(ctx: &Context<'_>) -> Result<String, String> {
     ctx.data_opt::<Claims>()
         .map(|c| c.sub.clone())
         .ok_or("not found login user".to_string())
 }
 
-pub fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
+pub(crate) fn get_role_from_ctx(ctx: &Context<'_>) -> Option<AuthRole> {
     ctx.data_opt::<Claims>()
         .map(|c| AuthRole::from_str(&c.role).expect("Cannot parse authrole"))
 }
@@ -65,7 +65,7 @@ pub(crate) async fn get_instance_pool_from_ctx<'ctx>(
         .await
 }
 
-pub fn get_producer_from_ctx<'ctx>(ctx: &Context<'ctx>) -> &'ctx FutureProducer {
+pub(crate) fn get_producer_from_ctx<'ctx>(ctx: &Context<'ctx>) -> &'ctx FutureProducer {
     ctx.data::<FutureProducer>()
         .expect("Can't get Kafka producer")
 }

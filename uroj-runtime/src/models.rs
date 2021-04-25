@@ -20,13 +20,7 @@ impl Query {
     async fn station_layout(&self, ctx: &Context<'_>, id: String) -> Result<StationData> {
         let pool = get_instance_pool_from_ctx(ctx).await;
         let instance = pool.get(&id).ok_or("no instance found")?;
-
-        let fsm = instance.fsm.clone();
-        let data = StationData {
-            title: station.title,
-            nodes: (),
-            signals: (),
-        };
+        let data = instance.station.clone();
         Ok(data)
     }
 
