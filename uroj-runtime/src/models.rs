@@ -1,19 +1,11 @@
-use crate::instance::{
-    fsm::{GameFrame, GlobalStatus, NodeID},
-    station::{ButtonKind, StationData},
-    PathBtn, {Instance, InstanceConfig, InstanceStatus},
-};
+use crate::instance::{{Instance, InstanceConfig, InstanceStatus}, GameFrame, PathBtn, fsm::NodeID, station::{ButtonKind, LayoutData}};
 use crate::raw_station::RawStation;
-use crate::{
-    get_conn_from_ctx, get_instance_pool_from_ctx, get_producer_from_ctx,
-    kafka::{self},
-};
+use crate::{get_conn_from_ctx, get_instance_pool_from_ctx};
 use async_graphql::*;
 use async_stream::stream;
+use chrono::Utc;
 use futures::Stream;
-use futures_util::StreamExt;
-use rdkafka::Message;
-use std::{str::FromStr, sync::Mutex};
+use std::{collections::HashMap, str::FromStr};
 use uroj_db::models::instance::Instance as InstanceModel;
 
 use uuid::Uuid;
@@ -21,16 +13,11 @@ use uuid::Uuid;
 #[Object]
 impl Query {
     //获取车站布局
-    async fn station_layout(&self, ctx: &Context<'_>, id: String) -> Result<StationData> {
+    async fn station_layout(&self, ctx: &Context<'_>, id: String) -> Result<LayoutData> {
         let pool = get_instance_pool_from_ctx(ctx).await;
         let instance = pool.get(&id).ok_or("no instance found")?;
-        let data = instance.station.clone();
+        let data = instance.layout.clone();
         Ok(data)
-    }
-
-    //获取全局状态
-    async fn global_status(&self, ctx: &Context<'_>, id: String) -> Result<GlobalStatus> {
-        todo!()
     }
 }
 
@@ -41,13 +28,28 @@ impl Mutation {
         let uuid = Uuid::from_str(&id)?;
         let conn = get_conn_from_ctx(ctx);
         let data = InstanceModel::find_one(uuid, &conn)?;
+        //time bound
+        if Utc::now().naive_local() < data.begin_at {
+            return Err(format!("instance {} cannot be initialized yet", id).into());
+        }
+
+        let scores = data.get_scores(&conn)?;
+        let mut questions = HashMap::new();
+        for q in &scores {
+            questions.insert(q.id, q.get_question(&conn)?);
+        }
+
+        let station_yaml = data.get_station(&conn)?.yaml;
+
         let cfg = InstanceConfig {
             id: data.id.to_string(),
             title: data.title.clone(),
-            player: data.player.clone(),
+            player: data.player_id.clone(),
             token: data.token.clone(),
-            station: RawStation::from_yaml(&data.yaml)?,
+            station: RawStation::from_yaml(&station_yaml)?,
+            questions: questions,
         };
+
         let mut pool = get_instance_pool_from_ctx(ctx).await;
         if pool.contains_key(&cfg.id) {
             return Err(format!("instance {} is already running", cfg.id).into());
@@ -78,8 +80,8 @@ impl Mutation {
         let ins = instances
             .get_mut(&id)
             .ok_or(format!("not found instance {}", id))?;
-        ins.spawn_train(at).await;
-        
+        ins.fsm.spawn_train(at).await;
+
         Ok(at)
     }
 
@@ -106,8 +108,7 @@ impl Mutation {
             },
         };
 
-        let producer = get_producer_from_ctx(ctx);
-        instance.create_path(start, end, producer).await?;
+        instance.create_path(start, end).await?;
 
         Ok(id)
     }
@@ -127,8 +128,7 @@ impl Mutation {
             kind: input.start_btn,
         };
 
-        let producer = get_producer_from_ctx(ctx);
-        instance.cancel_path(start, producer).await?;
+        instance.cancel_path(start).await?;
         Ok(id)
     }
 
@@ -147,8 +147,7 @@ impl Mutation {
             kind: input.start_btn,
         };
 
-        let producer = get_producer_from_ctx(ctx);
-        instance.cancel_path(start, producer).await?;
+        instance.cancel_path(start).await?;
         Ok(id)
     }
 
@@ -187,24 +186,11 @@ impl Subscription {
     ) -> Result<impl Stream<Item = GameFrame>> {
         let pool = get_instance_pool_from_ctx(ctx).await;
         let instance = pool.get(&id).ok_or("no instance found")?;
-        let kafka_consumer_counter = ctx
-            .data::<Mutex<i32>>()
-            .expect("Can't get Kafka consumer counter");
-        let consumer_group_id = kafka::get_kafka_consumer_group_id(kafka_consumer_counter);
-        let consumer = kafka::create_consumer(consumer_group_id);
+        let mut stream = instance.tx.subscribe();
 
         Ok(stream! {
-            let mut stream = consumer.stream();
-
-            while let Some(value) = stream.next().await {
-                yield match value {
-                    Ok(message) => {
-                        let payload = message.payload().expect("Kafka message should contain payload");
-                        let message = String::from_utf8_lossy(payload).to_string();
-                        serde_json::from_str(&message).expect("Can't deserialize a frame")
-                    }
-                    Err(e) => panic!("Error while Kafka message processing: {}", e)
-                };
+            while let Ok(value) = stream.recv().await {
+                yield value;
             }
         })
     }

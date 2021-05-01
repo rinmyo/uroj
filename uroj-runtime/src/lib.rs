@@ -1,32 +1,27 @@
 use actix_web::{guard, web};
-use async_graphql::{dataloader::DataLoader, Context, Schema};
-use instance::Instance;
+use async_graphql::{Context, Schema};
 use models::{AppSchema, Mutation, Query, Subscription};
-use std::{
-    str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::{str::FromStr};
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 
-use rdkafka::producer::FutureProducer;
 use uroj_common::utils::{Claims, Role as AuthRole};
 use uroj_db::connection::{Conn, PgPool};
 
 pub fn configure_service(cfg: &mut web::ServiceConfig) {
-    cfg.service(handlers::index_playground)
-        .service(handlers::index)
-        .service(
-            web::resource("/").route(
+    cfg.service(
+        web::resource("/")
+            .route(web::post().to(handlers::index))
+            .route(
                 web::get()
                     .guard(guard::Header("upgrade", "websocket"))
                     .to(handlers::index_ws),
-            ),
-        );
+            )
+            .route(web::get().to(handlers::index_playground)),
+    );
 }
 
 pub fn create_schema_with_context(db_pool: PgPool, ins_pool: InstancePool) -> AppSchema {
     let mux_ins_pool = TokioMutex::new(ins_pool);
-    let kafka_consumer_counter = Mutex::new(0);
 
     Schema::build(Query, Mutation, Subscription)
         // limits are commented out, because otherwise introspection query won't work
@@ -34,8 +29,6 @@ pub fn create_schema_with_context(db_pool: PgPool, ins_pool: InstancePool) -> Ap
         // .limit_complexity(15)
         .data(db_pool)
         .data(mux_ins_pool)
-        .data(kafka::create_producer())
-        .data(kafka_consumer_counter)
         .finish()
 }
 
@@ -65,15 +58,10 @@ pub(crate) async fn get_instance_pool_from_ctx<'ctx>(
         .await
 }
 
-pub(crate) fn get_producer_from_ctx<'ctx>(ctx: &Context<'ctx>) -> &'ctx FutureProducer {
-    ctx.data::<FutureProducer>()
-        .expect("Can't get Kafka producer")
-}
 
-mod instance;
 mod handlers;
-mod kafka;
-mod raw_station;
+mod instance;
 mod models;
+mod raw_station;
 
 pub type InstancePool = instance::InstancePool;

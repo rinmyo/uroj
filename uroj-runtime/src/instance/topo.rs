@@ -3,28 +3,37 @@
 // 2. パースの点たちは相互にS関係がないこと
 // 3. パースの点はLOCKでもUSEでもいけないこと
 
-use crate::raw_station::{RawNode, RawDirection};
+use std::collections::HashMap;
+
+use crate::raw_station::{IndButton, RawDirection, RawNode, RawSignal};
 use petgraph::{
     algo,
     graphmap::{DiGraphMap, UnGraphMap},
 };
 
-use super::fsm::{NodeID};
+use super::fsm::NodeID;
 
 //站場圖
-pub(crate) struct StationGraph {
+pub(crate) struct Topo {
     pub(crate) r_graph: DiGraphMap<NodeID, RawDirection>,
     pub(crate) s_graph: UnGraphMap<NodeID, ()>,
+    pub(crate) dif_relation: HashMap<String, String>,
+    pub(crate) jux_relation: HashMap<String, String>,
+    pub(crate) ind_btn: HashMap<String, NodeID>,
     // b_graph: UnGraphMap<NodeID, ()>,
 }
 
-impl StationGraph {
-    pub(crate) fn new(data: &Vec<RawNode>) -> StationGraph {
+impl Topo {
+    pub(crate) fn new(
+        nodes: &Vec<RawNode>,
+        sgns: &Vec<RawSignal>,
+        ind_btns: &Vec<IndButton>,
+    ) -> Self {
         let mut r_graph = DiGraphMap::new();
         let mut s_graph = UnGraphMap::new();
         // let b_graph= UnGraphMap::new();
 
-        data.iter().for_each(|n| {
+        nodes.iter().for_each(|n| {
             for i in &n.left_adj {
                 r_graph.add_edge(n.id, *i, RawDirection::Left);
             }
@@ -36,10 +45,27 @@ impl StationGraph {
             }
         });
 
-        StationGraph {
+        let jux_relation = sgns
+            .iter()
+            .filter_map(|s| s.jux_sgn.as_ref().map(|k| (s.id.clone(), k.clone())))
+            .collect();
+
+        let dif_relation = sgns
+            .iter()
+            .filter_map(|s| s.dif_sgn.as_ref().map(|k| (s.id.clone(), k.clone())))
+            .collect();
+
+        let ind_btn = ind_btns
+            .iter()
+            .map(|b| (b.id.clone(), b.protect_node_id))
+            .collect();
+
+        Topo {
             r_graph: r_graph,
             s_graph: s_graph,
-            // b_graph: b_graph,
+            jux_relation: jux_relation,
+            dif_relation: dif_relation,
+            ind_btn: ind_btn,
         }
     }
 
@@ -48,7 +74,7 @@ impl StationGraph {
         &self,
         start: NodeID,
         goal: NodeID,
-    ) -> Option<(Vec<NodeID>, RawDirection)> {
+    ) -> Option<(Vec<NodeID>, RawDirection, RawDirection)> {
         if start == goal {
             return None;
         }
@@ -62,16 +88,20 @@ impl StationGraph {
                 }
             }
         }
-        let dir = self
+        let entry_dir = self
             .r_graph
             .edge_weight(maybe_path[0], maybe_path[1])?
             .clone();
-        Some((maybe_path, dir))
+
+        let end_dir = self
+            .r_graph
+            .edge_weight(maybe_path[maybe_path.len() - 2], maybe_path[maybe_path.len() - 1])?
+            .clone();
+
+        Some((maybe_path, entry_dir, end_dir))
     }
 
     pub(crate) fn direction(&self, from: NodeID, to: NodeID) -> Option<RawDirection> {
-        self.r_graph
-            .edge_weight(from, to)
-            .map(|d| d.clone())
+        self.r_graph.edge_weight(from, to).map(|d| d.clone())
     }
 }

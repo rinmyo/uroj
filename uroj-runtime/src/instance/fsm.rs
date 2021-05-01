@@ -1,33 +1,36 @@
 use std::{collections::HashMap, time::Duration};
 
-use crate::{kafka::send_message, raw_station::*};
+use crate::raw_station::*;
 use async_graphql::*;
-use rdkafka::producer::FutureProducer;
 use serde::{Deserialize, Serialize};
 use strum_macros::*;
-use tokio::time::sleep;
+use tokio::{
+    sync::{Mutex, MutexGuard},
+    time::sleep,
+};
+
+use super::{FrameSender, GameFrame, Instance};
 
 //實例狀態機
 pub(crate) struct InstanceFSM {
-    pub(crate) sgns: HashMap<String, Signal>,
-    pub(crate) nodes: HashMap<NodeID, Node>,
+    pub(crate) sgns: HashMap<String, Mutex<Signal>>,
+    pub(crate) nodes: HashMap<NodeID, Mutex<Node>>,
+    pub(crate) trains: Vec<Train>,
 }
 
 impl InstanceFSM {
-    pub(crate) fn node_mut(&mut self, id: NodeID) -> &mut Node {
-        self.nodes.get_mut(&id).expect("cannot get node")
+    pub(crate) async fn node(&self, id: NodeID) -> MutexGuard<'_, Node> {
+        self.nodes.get(&id).expect("cannot get node").lock().await
     }
 
-    pub(crate) fn node(&self, id: NodeID) -> &Node {
-        &self.nodes[&id]
+    pub(crate) async fn sgn(&self, id: &str) -> MutexGuard<'_, Signal> {
+        self.sgns.get(id).expect("cannot get node").lock().await
     }
 
-    pub(crate) fn sgn(&self, id: &str) -> &Signal {
-        &self.sgns[id]
-    }
-
-    pub(crate) fn sgn_mut(&mut self, id: &str) -> &mut Signal {
-        self.sgns.get_mut(id).expect("cannot get node")
+    pub(crate) async fn spawn_train(&mut self, node: NodeID) {
+        let id = self.trains.len() + 1;
+        let new_train = Train::new(node, id);
+        self.trains.push(new_train);
     }
 }
 
@@ -40,23 +43,23 @@ pub(crate) struct Node {
     pub(crate) kind: RawNodeKind,
     pub(crate) once_occ: bool,
     pub(crate) is_lock: bool,
+    pub(crate) len: f64,                     //全长
     pub(crate) left_sgn_id: Option<String>, //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
     pub(crate) right_sgn_id: Option<String>, //两端的防护信号机，只有防护自己的信号机才在这里//點燈時用的
 }
 
 impl Node {
-    pub(crate) async fn unlock(&mut self, producer: &FutureProducer) {
-        sleep(Duration::from_secs(3)).await;
+    pub(crate) async fn unlock(&mut self, sender: &FrameSender) {
         self.is_lock = false;
-        self.sync_state(producer).await;
+        self.sync_state(sender).await;
     }
 
-    pub(crate) async fn lock(&mut self, producer: &FutureProducer) {
+    pub(crate) async fn lock(&mut self, sender: &FrameSender) {
         self.is_lock = true;
-        self.sync_state(producer).await;
+        self.sync_state(sender).await;
     }
 
-    async fn sync_state(&mut self, producer: &FutureProducer) {
+    async fn sync_state(&mut self, sender: &FrameSender) {
         let state = if self.is_lock {
             NodeStatus::Lock
         } else {
@@ -66,19 +69,25 @@ impl Node {
             id: self.node_id,
             state: state,
         })
-        .send_via(producer)
+        .send_via(sender)
         .await;
     }
 }
 
 impl From<&RawNode> for Node {
     fn from(data: &RawNode) -> Self {
+        let (x1, y1) = data.line.0;
+        let (x2, y2) = data.line.1;
+
+        let (dx, dy) = (x2 - x1, y2 - y1);
+        let len = (dx * dx + dy * dy).sqrt();
         Node {
             node_id: data.id,
             used_count: 0,
             state: Default::default(),
             once_occ: false,
             is_lock: false,
+            len: len,
             left_sgn_id: None,  //先缺省，之後推斷
             right_sgn_id: None, //先缺省之後推斷
             kind: data.node_kind.clone(),
@@ -107,7 +116,6 @@ pub(crate) struct Signal {
     pub(crate) id: String,
     pub(crate) filament_status: (FilamentStatus, FilamentStatus),
     pub(crate) state: SignalStatus,
-    pub(crate) used_flag: bool,     //征用
     pub(crate) kind: RawSignalKind, //因为逻辑不需要变化
     pub(crate) protect_node_id: NodeID,
     pub(crate) toward_node_id: NodeID,
@@ -131,7 +139,6 @@ impl From<&RawSignal> for Signal {
             id: data.id.clone(),
             filament_status: filament_status,
             state: state,
-            used_flag: false,
             kind: data.sgn_kind,
             protect_node_id: data.protect_node_id,
             toward_node_id: data.toward_node_id,
@@ -155,50 +162,50 @@ impl Signal {
         }
     }
 
-    pub(crate) async fn update(&mut self, state: SignalStatus, producer: &FutureProducer) {
+    pub(crate) async fn update(&mut self, state: SignalStatus, sender: &FrameSender) {
         self.state = state;
 
         GameFrame::UpdateSignal(UpdateSignal {
             id: self.id.clone(),
             state: state,
         })
-        .send_via(producer)
+        .send_via(sender)
         .await;
     }
 
-    pub(crate) async fn protect(&mut self, producer: &FutureProducer) {
+    pub(crate) async fn protect(&mut self, sender: &FrameSender) {
         let new_state = match self.kind {
             RawSignalKind::HomeSignal => SignalStatus::H,
             RawSignalKind::StartingSignal => SignalStatus::H,
             RawSignalKind::ShuntingSignal => SignalStatus::A,
         };
-        self.update(new_state, producer).await;
+        self.update(new_state, sender).await;
     }
 
     //开放接车进路
-    pub(crate) async fn open_recv(&mut self, goal_kind: RawNodeKind, producer: &FutureProducer) {
+    pub(crate) async fn open_recv(&mut self, goal_kind: RawNodeKind, sender: &FrameSender) {
         let new_state = match goal_kind {
             RawNodeKind::Mainline => SignalStatus::U,
             RawNodeKind::Siding => SignalStatus::UU,
             RawNodeKind::Siding18 => SignalStatus::US,
             RawNodeKind::Normal => return,
         };
-        self.update(new_state, producer).await;
+        self.update(new_state, sender).await;
     }
 
     //开放发车进路信号
-    pub(crate) async fn open_send(&mut self, producer: &FutureProducer) {
-        self.update(SignalStatus::L, producer).await;
+    pub(crate) async fn open_send(&mut self, sender: &FrameSender) {
+        self.update(SignalStatus::L, sender).await;
     }
 
     //开放通過進路信號
-    pub(crate) async fn open_pass(&mut self, producer: &FutureProducer) {
-        self.update(SignalStatus::L, producer).await;
+    pub(crate) async fn open_pass(&mut self, sender: &FrameSender) {
+        self.update(SignalStatus::L, sender).await;
     }
 
     //开放调车进路信号
-    pub(crate) async fn open_shnt<'a>(&mut self, producer: &FutureProducer) {
-        self.update(SignalStatus::L, producer).await;
+    pub(crate) async fn open_shnt<'a>(&mut self, sender: &FrameSender) {
+        self.update(SignalStatus::L, sender).await;
     }
 }
 
@@ -232,24 +239,10 @@ impl Default for FilamentStatus {
     }
 }
 
-#[derive(SimpleObject)]
+#[derive(Clone, SimpleObject, Serialize, Deserialize)]
 pub(crate) struct GlobalStatus {
     pub(crate) nodes: Vec<UpdateNode>,
     pub(crate) signals: Vec<UpdateSignal>,
-}
-
-#[derive(Union, Clone, Serialize, Deserialize)]
-pub(crate) enum GameFrame {
-    UpdateSignal(UpdateSignal),
-    UpdateNode(UpdateNode),
-    MoveTrain(MoveTrain),
-}
-
-impl GameFrame {
-    pub(crate) async fn send_via(&self, producer: &FutureProducer) {
-        let msg = serde_json::to_string(self).expect("cannot parse frame");
-        send_message(producer, msg).await;
-    }
 }
 
 #[derive(SimpleObject, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -268,4 +261,83 @@ pub(crate) struct MoveTrain {
     pub(crate) id: usize,
     pub(crate) node_id: NodeID,
     pub(crate) process: f64,
+}
+
+type TrainID = usize;
+
+pub(crate) struct Train {
+    pub(crate) id: TrainID,
+    past_node: Vec<NodeID>,
+}
+
+impl Train {
+    pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Self {
+        Train {
+            id: id,
+            past_node: vec![spawn_at],
+        }
+    }
+
+    pub(crate) fn curr_node(&self) -> NodeID {
+        self.past_node.last().unwrap().clone()
+    }
+
+    //when node state is changed, call me
+    pub(crate) async fn can_move_to(&self, target: NodeID, ins: &Instance) -> bool {
+        let topo = &ins.topo;
+        let curr = self.curr_node();
+        //鄰接保證物理上車可以移動
+        //行车方向
+        let dir = topo.direction(curr, target);
+        if let None = dir {
+            return false;
+        }
+        //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
+
+        let target_node = ins.fsm.node(target).await;
+        let pro_sgn_id = match dir.unwrap() {
+            RawDirection::Left => target_node.right_sgn_id.as_ref(),
+            RawDirection::Right => target_node.left_sgn_id.as_ref(),
+        };
+
+        for s in pro_sgn_id {
+            if !ins.fsm.sgn(&s).await.is_allowed() {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    async fn move_to(&mut self, target: NodeID, ins: &Instance) {
+        let from = self.curr_node();
+
+        //入口防護信號燈
+        ins.fsm.node(target).await.state = NodeStatus::Occupied; //下一段占用
+        let mut from = ins.fsm.node(from).await;
+        from.state = NodeStatus::Vacant; // 上一段出清
+        from.once_occ = true; // 上一段曾占用
+        self.past_node.push(target.clone());
+
+        //三點檢查
+        // if  {}
+        sleep(Duration::from_secs(3)).await;
+    }
+
+    //when node state is changed, call me
+    pub(crate) async fn try_move_to(
+        &mut self,
+        target: NodeID,
+        ins: &Instance,
+    ) -> Option<GameFrame> {
+        if self.can_move_to(target, ins).await {
+            self.move_to(target, ins).await;
+            return Some(GameFrame::MoveTrain(MoveTrain {
+                id: self.id,
+                node_id: target,
+                process: 0.,
+            }));
+        }
+        None
+    }
 }

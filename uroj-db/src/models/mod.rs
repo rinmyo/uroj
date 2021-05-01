@@ -1,7 +1,9 @@
 pub mod frame;
-pub mod instance_log;
+pub mod question;
+pub mod exam;
 pub mod station;
 pub mod user;
 pub mod class;
 pub mod instance;
 pub mod executor;
+pub mod instance_question;

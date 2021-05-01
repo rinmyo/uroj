@@ -50,6 +50,7 @@ pub(crate) struct SignalData {
     pub(crate) side: RawNodeSide,
     pub(crate) dir: RawDirection, //
     pub(crate) pos: Point,
+    pub(crate) btns: Vec<ButtonKind>,
 }
 
 //從rawsignal 到 signaldata，不能推斷的類型先缺省
@@ -61,6 +62,7 @@ impl From<&RawSignal> for SignalData {
             sgn_mnt: sgn.sgn_mnt,
             protect_node_id: sgn.protect_node_id,
             side: sgn.side,
+            btns: sgn.btns.iter().map(|b| b.into()).collect(),
             dir: RawDirection::Left,  //缺省，需要更新
             pos: Point::from((0, 0)), //缺省，需要更新
         }
@@ -69,7 +71,7 @@ impl From<&RawSignal> for SignalData {
 
 // front models
 #[derive(SimpleObject, Clone)]
-pub(crate) struct StationData {
+pub(crate) struct LayoutData {
     pub(crate) title: String,
     pub(crate) nodes: Vec<NodeData>,
     pub(crate) signals: Vec<SignalData>,
@@ -82,4 +84,16 @@ pub enum ButtonKind {
     Train, //列車按鈕（接發車）
     Guide, //引導按鈕
     LZA,   //列車終端按鈕
+}
+
+impl From<&RawButtonKind> for ButtonKind {
+    fn from(kind: &RawButtonKind) -> Self {
+        match kind {
+            RawButtonKind::Pass => ButtonKind::Pass,
+            RawButtonKind::Shunt => ButtonKind::Shunt,
+            RawButtonKind::Train => ButtonKind::Train,
+            RawButtonKind::Guide => ButtonKind::Guide,
+            RawButtonKind::LZA => ButtonKind::LZA,
+        }
+    }
 }

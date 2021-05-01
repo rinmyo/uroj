@@ -14,7 +14,7 @@ async fn main() -> std::io::Result<()> {
     let schema = create_schema_with_context(pool);
 
     HttpServer::new(move || App::new().configure(configure_service).data(schema.clone()))
-        .bind("0.0.0.0:8003")?
+        .bind("0.0.0.0:8002")?
         .run()
         .await
 }

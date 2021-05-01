@@ -22,6 +22,7 @@ pub fn create_schema_with_context(pool: PgPool) -> AppSchema {
     .max_batch_size(10);
 
     Schema::build(Query, Mutation, EmptySubscription)
+        .enable_federation()
         .data(arc_pool)
         .data(details_data_loader)
         .finish()

@@ -13,7 +13,6 @@ pub(crate) async fn index_ws(
     WSSubscription::start(Schema::clone(&schema), &req, payload)
 }
 
-#[get("/")]
 pub(crate) async fn index_playground() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -22,7 +21,6 @@ pub(crate) async fn index_playground() -> HttpResponse {
         ))
 }
 
-#[post("/")]
 pub(crate) async fn index(schema: web::Data<AppSchema>, http_req: HttpRequest, req: Request) -> Response {
     let mut query = req.into_inner();
 

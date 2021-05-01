@@ -1,4 +1,4 @@
-use super::user::User;
+use super::{instance_question::InstanceQuestion, station::Station};
 use crate::schema::instances;
 use crate::schema::instances::dsl::*;
 use chrono::NaiveDateTime;
@@ -6,15 +6,15 @@ use diesel::prelude::*;
 use uuid::Uuid;
 
 #[derive(Debug, Identifiable, Associations, Queryable, AsChangeset)]
-#[belongs_to(User, foreign_key = "player")]
+#[belongs_to(Station)]
 pub struct Instance {
     pub id: Uuid,
     pub title: String,
     pub description: Option<String>,
     pub created_at: NaiveDateTime,
-    pub creator: Option<String>,
-    pub player: String,
-    pub yaml: String,
+    pub creator_id: Option<String>,
+    pub player_id: String,
+    pub station_id: i32,
     pub curr_state: String,
     pub begin_at: NaiveDateTime,
     pub executor_id: i32,
@@ -33,6 +33,14 @@ impl Instance {
 
         Ok(())
     }
+
+    pub fn get_scores(&self, conn: &PgConnection) -> QueryResult<Vec<InstanceQuestion>> {
+        InstanceQuestion::belonging_to(self).load(conn)
+    }
+
+    pub fn get_station(&self, conn: &PgConnection) -> QueryResult<Station> {
+        Station::find(self.station_id, conn)
+    }
 }
 
 #[derive(Insertable, Debug, AsChangeset, Associations)]
@@ -40,9 +48,9 @@ impl Instance {
 pub struct NewInstance {
     pub title: String,
     pub description: Option<String>,
-    pub creator: Option<String>,
-    pub player: String,
-    pub yaml: String,
+    pub creator_id: String,
+    pub player_id: String,
+    pub station_id: i32,
     pub curr_state: String,
     pub executor_id: i32, //指定
     pub token: String,

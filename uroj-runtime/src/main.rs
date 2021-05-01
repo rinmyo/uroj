@@ -1,3 +1,4 @@
+use actix_cors::Cors;
 use actix_web::{App, HttpServer};
 use dotenv::dotenv;
 use uroj_db::{connection::create_connection_pool, run_migrations};
@@ -12,8 +13,13 @@ async fn main() -> std::io::Result<()> {
     run_migrations(&db_pool);
     let schema = create_schema_with_context(db_pool, ins_pool);
 
-    HttpServer::new(move || App::new().configure(configure_service).data(schema.clone()))
-        .bind("0.0.0.0:8003")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .wrap(Cors::permissive())
+            .configure(configure_service)
+            .data(schema.clone())
+    })
+    .bind("0.0.0.0:8003")?
+    .run()
+    .await
 }
