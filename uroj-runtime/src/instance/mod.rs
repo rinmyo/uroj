@@ -4,21 +4,24 @@ pub(crate) mod station;
 pub(crate) mod topo;
 
 use async_graphql::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use strum_macros::*;
-use tokio::sync::{
+use tokio::{sync::{
     broadcast::{self, Receiver, Sender},
     Mutex,
-};
+}, time::sleep};
 
 use serde::{Deserialize, Serialize};
 use uroj_db::models::question::Question as QuestionModel;
 
 use crate::raw_station::{RawDirection, RawSignalKind, RawStation};
 
-use self::{exam::UpdateQuestion, station::{ButtonKind, LayoutData, NodeData, SignalData}};
 use self::topo::Topo;
 use self::{exam::ExamManager, fsm::*};
+use self::{
+    exam::UpdateQuestion,
+    station::{ButtonKind, LayoutData, NodeData, SignalData},
+};
 
 #[derive(Union, Clone, Serialize, Deserialize)]
 pub(crate) enum GameFrame {
@@ -39,8 +42,8 @@ pub(crate) type FrameSender = Sender<GameFrame>;
 
 pub struct Instance {
     pub(crate) layout: LayoutData,
-    pub(crate) fsm: InstanceFSM,
-    pub(crate) topo: Topo,
+    pub(crate) fsm: Arc<Mutex<InstanceFSM>>,
+    pub(crate) topo: Arc<Topo>,
     pub(crate) exam: Option<ExamManager>,
     pub(crate) tx: FrameSender,
     pub(crate) _rx: Receiver<GameFrame>,
@@ -118,7 +121,7 @@ impl Instance {
                 .map(|(id, node)| (id, Mutex::new(node)))
                 .collect(),
 
-            trains: Vec::new(),
+            trains: Arc::new(Mutex::new(Vec::new())),
         };
 
         let exam = if (&cfg.questions).is_empty() {
@@ -129,8 +132,8 @@ impl Instance {
 
         let (tx, rx) = broadcast::channel(32);
         Ok(Instance {
-            fsm: fsm,
-            topo: topo,
+            fsm: Arc::new(Mutex::new(fsm)),
+            topo: Arc::new(topo),
             layout: layout,
             exam: exam,
             tx: tx,
@@ -145,8 +148,9 @@ impl Instance {
         end: PathBtn,
     ) -> Result<Vec<NodeID>, String> {
         let topo = &self.topo;
+        let fsm = &self.fsm.lock().await;
 
-        let start_sgn = self.fsm.sgn(&start.id).await;
+        let start_sgn = fsm.sgn(&start.id).await;
 
         let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.dir.reverse());
         //這裏的方向是根據用戶輸入判斷的朝向，和最終尋到的路徑的前後朝向做判斷
@@ -157,7 +161,7 @@ impl Instance {
             //通過按鈕 -> 列車按鈕 = 通過進路
             (ButtonKind::Pass, ButtonKind::Train) => {
                 is_pass = true;
-                let end_sgn = self.fsm.sgn(&end.id).await;
+                let end_sgn = fsm.sgn(&end.id).await;
                 (end_sgn.protect_node_id, end_sgn.dir.clone())
             }
             //通過按鈕 -> 列車終端按鈕 = 通過進路
@@ -174,7 +178,7 @@ impl Instance {
             }
             //列車按鈕 -> 列車按鈕 = 接發車進路
             (ButtonKind::Train, ButtonKind::Train) => {
-                let end_sgn = self.fsm.sgn(&end.id).await;
+                let end_sgn = fsm.sgn(&end.id).await;
                 match (&start_sgn.kind, &end_sgn.kind) {
                     //進站信號機 -> 出戰信號機 => 接車進路
                     (RawSignalKind::HomeSignal, RawSignalKind::StartingSignal) => {
@@ -215,10 +219,10 @@ impl Instance {
                     .topo
                     .dif_relation
                     .get(&end.id)
-                    .or(self.topo.jux_relation.get(&end.id))
+                    .or(topo.jux_relation.get(&end.id))
                     .unwrap_or(&end.id);
 
-                let end_sgn = self.fsm.sgn(end_id).await;
+                let end_sgn = fsm.sgn(end_id).await;
 
                 (end_sgn.toward_node_id, end_sgn.dir.reverse())
             }
@@ -239,7 +243,7 @@ impl Instance {
         //ensure that all nodes are not used or locked by another existing path
         let mut sgn_id = Vec::new();
         for node in &maybe_path {
-            let node = self.fsm.node(*node).await;
+            let node = fsm.node(*node).await;
             if node.state != NodeStatus::Vacant {
                 return Err("target path is not vacant".into());
             }
@@ -261,11 +265,11 @@ impl Instance {
 
         //锁闭区段
         for id in &maybe_path {
-            let mut node = self.fsm.node(*id).await;
+            let mut node = fsm.node(*id).await;
             node.lock(&self.tx).await;
             node.once_occ = false; //重置曾占用flag
             for id in topo.s_graph.neighbors(*id) {
-                let mut node = self.fsm.node(id).await;
+                let mut node = fsm.node(id).await;
                 node.used_count += 1;
             }
         }
@@ -273,7 +277,7 @@ impl Instance {
         //開放長調車進路途經信號機
 
         let tx = &self.tx;
-        let mut start_sgn = self.fsm.sgn(&start.id).await;
+        let mut start_sgn = fsm.sgn(&start.id).await;
 
         if is_pass {
             start_sgn.open_pass(tx).await;
@@ -284,13 +288,13 @@ impl Instance {
         }
 
         if is_recv {
-            let kind = self.fsm.node(goal_node).await.kind.clone();
+            let kind = fsm.node(goal_node).await.kind.clone();
             start_sgn.open_recv(kind, tx).await;
         }
 
         if is_shnt {
             for id in sgn_id {
-                let mut sgn = self.fsm.sgn(&id).await;
+                let mut sgn = fsm.sgn(&id).await;
                 sgn.open_shnt(tx).await;
             }
         }
@@ -300,7 +304,9 @@ impl Instance {
 
     //進路を消す
     pub(crate) async fn cancel_path(&self, start: PathBtn) -> Result<(), String> {
-        let mut start_sgn = self.fsm.sgn(&start.id).await;
+        let fsm = &self.fsm.lock().await;
+
+        let mut start_sgn = fsm.sgn(&start.id).await;
         if !start_sgn.is_allowed() {
             return Err("not find a existed route".into());
         }
@@ -312,7 +318,7 @@ impl Instance {
             .await
             .ok_or("not find a existed route")?;
 
-        let close_node = self.fsm.node(start_sgn.toward_node_id).await;
+        let close_node = fsm.node(start_sgn.toward_node_id).await;
         if close_node.state != NodeStatus::Vacant {
             return Err("approching node is not vacant".into());
         }
@@ -325,23 +331,23 @@ impl Instance {
 
         //解鎖所有節點
         for n in maybe_route {
-            let mut node = self.fsm.node(n).await;
+            let mut node = fsm.node(n).await;
 
             node.unlock(&self.tx).await;
 
             let sgn_id = match start_dir {
-                RawDirection::Left => self.fsm.node(n).await.right_sgn_id.clone(),
-                RawDirection::Right => self.fsm.node(n).await.left_sgn_id.clone(),
+                RawDirection::Left => fsm.node(n).await.right_sgn_id.clone(),
+                RawDirection::Right => fsm.node(n).await.left_sgn_id.clone(),
             };
 
             for id in self.topo.s_graph.neighbors(n) {
-                let mut node = self.fsm.node(id).await;
+                let mut node = fsm.node(id).await;
                 node.used_count -= 1; //对扩展集中的点解除征用
             }
 
             //調車進路鎖閉所有調車信號機
             if let Some(sgn_id) = sgn_id {
-                let mut sgn = self.fsm.sgn(&sgn_id).await;
+                let mut sgn = fsm.sgn(&sgn_id).await;
                 if sgn.kind == RawSignalKind::ShuntingSignal {
                     sgn.protect(&self.tx).await;
                 }
@@ -353,8 +359,13 @@ impl Instance {
         Ok(())
     }
 
-    async fn find_a_route(&self, nid: NodeID, dir: &RawDirection) -> Option<Vec<NodeID>> {
-        let curr = self.fsm.node(nid).await;
+    pub(crate) async fn find_a_route(
+        &self,
+        nid: NodeID,
+        dir: &RawDirection,
+    ) -> Option<Vec<NodeID>> {
+        let fsm = &self.fsm.lock().await;
+        let curr = fsm.node(nid).await;
         if !curr.is_lock || curr.state != NodeStatus::Vacant {
             return None;
         }
@@ -365,16 +376,13 @@ impl Instance {
         Some(res)
     }
 
-    pub(crate) async fn next_route_node(
-        &self,
-        start_node: NodeID,
-        dir: &RawDirection,
-    ) -> Option<NodeID> {
+    pub(crate) async fn next_route_node(&self, start_node: NodeID, dir: &RawDirection) -> Option<NodeID> {
         let topo = &self.topo;
+        let fsm = self.fsm.lock().await;
         let edges = topo.r_graph.edges(start_node);
 
         for (_, t, d) in edges {
-            let to = self.fsm.node(t).await;
+            let to = fsm.node(t).await;
             if d == dir && to.is_lock && to.state == NodeStatus::Vacant {
                 return Some(t);
             }

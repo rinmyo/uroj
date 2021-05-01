@@ -6,16 +6,16 @@ use uuid::Uuid;
 
 #[derive(Debug, Identifiable, Associations, Queryable, AsChangeset)]
 #[belongs_to(Instance)]
+#[primary_key(instance_id, question_id)]
 pub struct InstanceQuestion {
-    pub id: i32,
     pub instance_id: Uuid,
     pub question_id: i32,
     pub score: Option<i32>,
 }
 
 impl InstanceQuestion {
-    pub fn find_one(sid: i32, conn: &PgConnection) -> QueryResult<Self> {
-        instance_questions.find(sid).first(conn)
+    pub fn find_one(iid: Uuid, sid: i32, conn: &PgConnection) -> QueryResult<Self> {
+        instance_questions.find((iid, sid)).first(conn)
     }
 
     pub fn get_by_question(qid: i32, conn: &PgConnection) -> QueryResult<Vec<Self>> {
@@ -27,9 +27,7 @@ impl InstanceQuestion {
     }
 
     pub fn update_score(&self, sre: i32, conn: &PgConnection) -> QueryResult<()> {
-        diesel::update(self)
-            .set(score.eq(sre))
-            .execute(conn)?;
+        diesel::update(self).set(score.eq(sre)).execute(conn)?;
         Ok(())
     }
 }

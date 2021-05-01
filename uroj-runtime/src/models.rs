@@ -1,11 +1,20 @@
-use crate::instance::{{Instance, InstanceConfig, InstanceStatus}, GameFrame, PathBtn, fsm::NodeID, station::{ButtonKind, LayoutData}};
 use crate::raw_station::RawStation;
 use crate::{get_conn_from_ctx, get_instance_pool_from_ctx};
+use crate::{
+    instance::{
+        exam::QuestionsData,
+        fsm::NodeID,
+        station::{ButtonKind, LayoutData},
+        GameFrame, PathBtn, {Instance, InstanceConfig, InstanceStatus},
+    },
+    raw_station::RawDirection,
+};
 use async_graphql::*;
 use async_stream::stream;
 use chrono::Utc;
 use futures::Stream;
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
+use tokio::time::sleep;
 use uroj_db::models::instance::Instance as InstanceModel;
 
 use uuid::Uuid;
@@ -18,6 +27,14 @@ impl Query {
         let instance = pool.get(&id).ok_or("no instance found")?;
         let data = instance.layout.clone();
         Ok(data)
+    }
+
+    //获取考题信息
+    async fn questions(&self, ctx: &Context<'_>, id: String) -> Result<QuestionsData> {
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
+        let data = instance.exam.as_ref().ok_or("not exam instance!")?;
+        Ok(data.get_questions())
     }
 }
 
@@ -36,7 +53,7 @@ impl Mutation {
         let scores = data.get_scores(&conn)?;
         let mut questions = HashMap::new();
         for q in &scores {
-            questions.insert(q.id, q.get_question(&conn)?);
+            questions.insert(q.question_id, q.get_question(&conn)?);
         }
 
         let station_yaml = data.get_station(&conn)?.yaml;
@@ -73,16 +90,6 @@ impl Mutation {
         InstanceModel::find_one(uuid, &conn)?
             .update_state(InstanceStatus::Finished.to_string(), &conn)?;
         Ok(id)
-    }
-
-    async fn spawn_train(&self, ctx: &Context<'_>, id: String, at: NodeID) -> Result<usize> {
-        let mut instances = get_instance_pool_from_ctx(ctx).await;
-        let ins = instances
-            .get_mut(&id)
-            .ok_or(format!("not found instance {}", id))?;
-        ins.fsm.spawn_train(at).await;
-
-        Ok(at)
     }
 
     //創建進路
@@ -156,6 +163,32 @@ impl Mutation {
         let pool = get_instance_pool_from_ctx(ctx).await;
         let instance = pool.get(&id).ok_or("no instance found")?;
         // instance.create_path();
+
+        Ok(id)
+    }
+
+    async fn spawn_train(&self, ctx: &Context<'_>, id: String, at: NodeID) -> Result<String> {
+        let mut pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get_mut(&id).ok_or("no instance found")?;
+        let mut fsm = instance.fsm.lock().await;
+        let topo = instance.topo.clone();
+
+        let arc_train = fsm.spawn_train(at).await;
+        let next_node = instance
+            .next_route_node(at, &RawDirection::Left)
+            .await
+            .or(instance.next_route_node(at, &RawDirection::Right).await);
+
+        let arc_fsm = instance.fsm.clone();
+        tokio::spawn(async move {
+            sleep(Duration::from_millis(1)).await;
+            if let Some(node) = next_node {
+                let fsm = arc_fsm.lock().await;
+                let mut train = arc_train.lock().await;
+
+                train.try_move_to(node, &fsm, &topo);
+            };
+        });
 
         Ok(id)
     }

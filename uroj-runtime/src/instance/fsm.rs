@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::raw_station::*;
 use async_graphql::*;
@@ -9,13 +9,13 @@ use tokio::{
     time::sleep,
 };
 
-use super::{FrameSender, GameFrame, Instance};
+use super::{topo::Topo, FrameSender, GameFrame, Instance};
 
 //實例狀態機
 pub(crate) struct InstanceFSM {
     pub(crate) sgns: HashMap<String, Mutex<Signal>>,
     pub(crate) nodes: HashMap<NodeID, Mutex<Node>>,
-    pub(crate) trains: Vec<Train>,
+    pub(crate) trains: Arc<Mutex<Vec<Arc<Mutex<Train>>>>>,
 }
 
 impl InstanceFSM {
@@ -27,10 +27,13 @@ impl InstanceFSM {
         self.sgns.get(id).expect("cannot get node").lock().await
     }
 
-    pub(crate) async fn spawn_train(&mut self, node: NodeID) {
-        let id = self.trains.len() + 1;
-        let new_train = Train::new(node, id);
-        self.trains.push(new_train);
+    pub(crate) async fn spawn_train(&mut self, node: NodeID) -> Arc<Mutex<Train>> {
+        let mut trains = self.trains.lock().await;
+        let id = trains.len() + 1;
+        let new_train = Arc::new(Train::new(node, id));
+        let cloned_train = new_train.clone();
+        trains.push(new_train);
+        cloned_train
     }
 }
 
@@ -271,11 +274,14 @@ pub(crate) struct Train {
 }
 
 impl Train {
-    pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Self {
-        Train {
+    pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Mutex<Self> {
+        let train = Train {
             id: id,
             past_node: vec![spawn_at],
-        }
+        };
+
+        let arc_train = Mutex::new(train);
+        arc_train
     }
 
     pub(crate) fn curr_node(&self) -> NodeID {
@@ -283,8 +289,7 @@ impl Train {
     }
 
     //when node state is changed, call me
-    pub(crate) async fn can_move_to(&self, target: NodeID, ins: &Instance) -> bool {
-        let topo = &ins.topo;
+    pub(crate) async fn can_move_to(&self, target: NodeID, topo: &Topo, fsm: &InstanceFSM) -> bool {
         let curr = self.curr_node();
         //鄰接保證物理上車可以移動
         //行车方向
@@ -294,14 +299,14 @@ impl Train {
         }
         //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
 
-        let target_node = ins.fsm.node(target).await;
+        let target_node = fsm.node(target).await;
         let pro_sgn_id = match dir.unwrap() {
             RawDirection::Left => target_node.right_sgn_id.as_ref(),
             RawDirection::Right => target_node.left_sgn_id.as_ref(),
         };
 
         for s in pro_sgn_id {
-            if !ins.fsm.sgn(&s).await.is_allowed() {
+            if !fsm.sgn(&s).await.is_allowed() {
                 return false;
             }
         }
@@ -309,12 +314,12 @@ impl Train {
         true
     }
 
-    async fn move_to(&mut self, target: NodeID, ins: &Instance) {
+    async fn move_to(&mut self, target: NodeID, fsm: &InstanceFSM) {
         let from = self.curr_node();
 
         //入口防護信號燈
-        ins.fsm.node(target).await.state = NodeStatus::Occupied; //下一段占用
-        let mut from = ins.fsm.node(from).await;
+        fsm.node(target).await.state = NodeStatus::Occupied; //下一段占用
+        let mut from = fsm.node(from).await;
         from.state = NodeStatus::Vacant; // 上一段出清
         from.once_occ = true; // 上一段曾占用
         self.past_node.push(target.clone());
@@ -328,10 +333,11 @@ impl Train {
     pub(crate) async fn try_move_to(
         &mut self,
         target: NodeID,
-        ins: &Instance,
+        fsm: &InstanceFSM,
+        topo: &Topo,
     ) -> Option<GameFrame> {
-        if self.can_move_to(target, ins).await {
-            self.move_to(target, ins).await;
+        if self.can_move_to(target, topo, fsm).await {
+            self.move_to(target, fsm).await;
             return Some(GameFrame::MoveTrain(MoveTrain {
                 id: self.id,
                 node_id: target,

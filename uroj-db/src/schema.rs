@@ -21,8 +21,7 @@ table! {
 }
 
 table! {
-    instance_questions (id) {
-        id -> Int4,
+    instance_questions (instance_id, question_id) {
         instance_id -> Uuid,
         question_id -> Int4,
         score -> Nullable<Int4>,
