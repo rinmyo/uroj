@@ -104,9 +104,9 @@ impl Mutation {
         let new_instance = NewInstanceData {
             title: input.title,
             description: input.description,
-            creator: Some(user.id),
-            player: input.player,
-            yaml: station.yaml,
+            creator_id: user.id,
+            player_id: input.player,
+            station_id: station.id,
             curr_state: InstanceStatus::default().to_string(),
             executor_id: input.executor_id,
             token: get_random_token(),

@@ -7,6 +7,8 @@ use uroj_db::models::question::Question as QuestionModel;
 
 use crate::{get_conn_from_ctx, instance::fsm::NodeID};
 
+use super::{FrameSender, GameFrame};
+
 type IQID = i32;
 #[derive(Deserialize, Serialize, Debug)]
 pub(crate) struct Question {
@@ -31,16 +33,6 @@ impl Question {
             score: qm.score,
         }
     }
-
-    fn sync_score_to_db(&self, score: i32, ctx: &Context<'_>) -> Result<(), String> {
-        let conn = get_conn_from_ctx(ctx);
-        let iq = InstanceQuestion::find_one(self.id, &conn)
-            .map_err::<String, _>(|_| "cannot find a question".into())?;
-
-        iq.update_score(score, &conn)
-            .map_err::<String, _>(|_| "cannot update score".into())?;
-        Ok(())
-    }
 }
 
 #[derive(Clone, SimpleObject, Serialize, Deserialize)]
@@ -53,7 +45,7 @@ pub(crate) struct UpdateQuestion {
 pub(crate) enum QuestionStatus {
     Expired,
     Completed,
-    Skip
+    Skip,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -73,12 +65,43 @@ impl ExamManager {
         }
     }
 
-    pub(crate) fn sync_all_score_to_db(&self, ctx: &Context<'_>) -> Result<(), String> {
-        for q in &self.question {
-            let score = self.score.get(&q.id).ok_or::<String>("err".into())?;
-            q.sync_score_to_db(*score, ctx);
+    pub(crate) fn sync_score_to_db(&self, ctx: &Context<'_>) -> Result<(), String> {
+        let conn = get_conn_from_ctx(ctx);
+
+        for (iqid, score) in &self.score {
+            let iq = InstanceQuestion::find_one(*iqid, &conn)
+                .map_err::<String, _>(|_| "cannot find a question".into())?;
+
+            iq.update_score(*score, &conn)
+                .map_err::<String, _>(|_| "cannot update score".into())?;
         }
 
         Ok(())
+    }
+
+    pub(crate) async fn update_state(
+        &mut self,
+        iqid: IQID,
+        state: QuestionStatus,
+        sender: &FrameSender,
+    ) {
+        let mut score = 0;
+
+        if state == QuestionStatus::Completed {
+            for q in &self.question {
+                if iqid == q.id {
+                    score = q.score
+                }
+            }
+        }
+
+        self.score.insert(iqid, score);
+
+        GameFrame::UpdateQuestion(UpdateQuestion {
+            id: iqid,
+            state: state,
+        })
+        .send_via(sender)
+        .await;
     }
 }
