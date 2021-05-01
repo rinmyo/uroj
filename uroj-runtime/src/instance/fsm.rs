@@ -5,7 +5,7 @@ use async_graphql::*;
 use serde::{Deserialize, Serialize};
 use strum_macros::*;
 use tokio::{
-    sync::{Mutex, MutexGuard},
+    sync::{broadcast::Sender, Mutex, MutexGuard},
     time::sleep,
 };
 
@@ -270,6 +270,7 @@ type TrainID = usize;
 
 pub(crate) struct Train {
     pub(crate) id: TrainID,
+    process: f64,
     past_node: Vec<NodeID>,
 }
 
@@ -277,6 +278,7 @@ impl Train {
     pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Mutex<Self> {
         let train = Train {
             id: id,
+            process: 0.5,
             past_node: vec![spawn_at],
         };
 
@@ -290,6 +292,9 @@ impl Train {
 
     //when node state is changed, call me
     pub(crate) async fn can_move_to(&self, target: NodeID, topo: &Topo, fsm: &InstanceFSM) -> bool {
+        if self.process < 1. {
+            return false; //必须大于1才能进入下一个移动
+        }
         let curr = self.curr_node();
         //鄰接保證物理上車可以移動
         //行车方向
@@ -323,6 +328,7 @@ impl Train {
         from.state = NodeStatus::Vacant; // 上一段出清
         from.once_occ = true; // 上一段曾占用
         self.past_node.push(target.clone());
+        self.process = 0.;
 
         //三點檢查
         // if  {}
@@ -330,20 +336,26 @@ impl Train {
     }
 
     //when node state is changed, call me
-    pub(crate) async fn try_move_to(
+    pub(crate) async fn try_next_step(
         &mut self,
         target: NodeID,
         fsm: &InstanceFSM,
         topo: &Topo,
-    ) -> Option<GameFrame> {
+        sender: &Sender<GameFrame>,
+    ) {
+        let old = self.process;
+        self.process += 0.001;
         if self.can_move_to(target, topo, fsm).await {
             self.move_to(target, fsm).await;
-            return Some(GameFrame::MoveTrain(MoveTrain {
-                id: self.id,
-                node_id: target,
-                process: 0.,
-            }));
         }
-        None
+        if old == self.process {
+            return;
+        }
+        GameFrame::MoveTrain(MoveTrain {
+            id: self.id,
+            node_id: target,
+            process: self.process,
+        })
+        .send_via(sender);
     }
 }

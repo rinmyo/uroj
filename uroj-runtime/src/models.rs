@@ -180,14 +180,16 @@ impl Mutation {
             .or(instance.next_route_node(at, &RawDirection::Right).await);
 
         let arc_fsm = instance.fsm.clone();
+        let sender = instance.tx.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(1)).await;
-            if let Some(node) = next_node {
-                let fsm = arc_fsm.lock().await;
-                let mut train = arc_train.lock().await;
-
-                train.try_move_to(node, &fsm, &topo);
-            };
+            loop {
+                if let Some(node) = next_node {
+                    let fsm = arc_fsm.lock().await;
+                    let mut train = arc_train.lock().await;
+                    train.try_next_step(node, &fsm, &topo, &sender).await;
+                    sleep(Duration::from_millis(1)).await;
+                };
+            }
         });
 
         Ok(id)
