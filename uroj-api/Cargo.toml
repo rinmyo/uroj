@@ -10,6 +10,7 @@ edition = "2018"
 serde="1"
 serde_yaml ="0.8"
 actix-web = "3"
+actix-cors = "0.5"
 async-graphql = {version = "2", features = ["chrono", "dataloader"]}
 async-graphql-actix-web = "2" # 如果你需要集成到Actix-web
 uuid = {version = "0.8", features = ["serde", "v4"]}

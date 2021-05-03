@@ -1,3 +1,4 @@
+use actix_cors::Cors;
 use actix_web::{App, HttpServer};
 use dotenv::dotenv;
 use uroj_auth::{configure_service, create_schema_with_context};
@@ -13,8 +14,13 @@ async fn main() -> std::io::Result<()> {
 
     let schema = create_schema_with_context(pool);
 
-    HttpServer::new(move || App::new().configure(configure_service).data(schema.clone()))
-        .bind("0.0.0.0:8002")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .wrap(Cors::permissive())
+            .configure(configure_service)
+            .data(schema.clone())
+    })
+    .bind("0.0.0.0:8002")?
+    .run()
+    .await
 }

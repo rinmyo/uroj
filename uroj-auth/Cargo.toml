@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 dotenv="0"
 actix-web = "3"
+actix-cors = "0.5"
 async-graphql = {version = "2", features = ["chrono", "dataloader"]}
 async-graphql-actix-web = "2" # 如果你需要集成到Actix-web
 serde = "1"

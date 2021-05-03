@@ -96,7 +96,7 @@ pub struct Mutation;
 
 #[Object]
 impl Mutation {
-    #[graphql(guard(RoleGuard(role = "AuthRole::Admin")))]
+    // #[graphql(guard(RoleGuard(role = "AuthRole::Admin")))]
     async fn create_user(&self, ctx: &Context<'_>, input: UserInput) -> Result<User> {
         let new_user = NewUserData {
             id: input.id,

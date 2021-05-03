@@ -34,6 +34,10 @@ impl Station {
     pub fn find_by_author(a: &User, conn: &PgConnection) -> QueryResult<Vec<Self>> {
         Station::belonging_to(a).load(conn)
     }
+
+    pub fn list_all(conn: &PgConnection) -> QueryResult<Vec<Self>> {
+        stations.load(conn)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Insertable)]

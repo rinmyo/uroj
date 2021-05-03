@@ -4,9 +4,7 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use async_graphql::{async_trait, dataloader::Loader, guard::Guard, Context, Object, Result};
 use async_graphql::{EmptySubscription, Error, Schema};
-use uroj_common::{
-    utils::{Claims, Role as AuthRole},
-};
+use uroj_common::utils::{Claims, Role as AuthRole};
 use uroj_db::connection::PgPool;
 use uroj_db::models::class::Class as ClassData;
 use uroj_db::models::instance::{Instance as InstanceData, NewInstance as NewInstanceData};
@@ -52,6 +50,13 @@ impl Query {
         Ok(user.into())
     }
 
+    #[graphql(guard(LoginGaurd()))]
+    async fn me(&self, ctx: &Context<'_>) -> Result<User> {
+        let uid = get_id_from_ctx(ctx).unwrap();
+        let ref user = UserData::get(&uid, &get_conn_from_ctx(ctx))?;
+        Ok(user.into())
+    }
+
     // #[graphql(guard(LoginGaurd()))]
     async fn users(&self, ctx: &Context<'_>) -> Result<Vec<User>> {
         Ok(UserData::list_all(&get_conn_from_ctx(ctx))?
@@ -67,10 +72,26 @@ impl Query {
     }
 
     #[graphql(guard(LoginGaurd()))]
+    async fn stations(&self, ctx: &Context<'_>) -> Result<Vec<Station>> {
+        Ok(StationData::list_all(&get_conn_from_ctx(ctx))?
+            .iter()
+            .map(|p| p.into())
+            .collect())
+    }
+
+    #[graphql(guard(LoginGaurd()))]
     async fn instance(&self, ctx: &Context<'_>, uuid: String) -> Result<Instance> {
         let uuid = Uuid::from_str(&uuid)?;
         let ref instance = InstanceData::find_one(uuid, &get_conn_from_ctx(ctx))?;
         Ok(instance.into())
+    }
+
+    #[graphql(guard(LoginGaurd()))]
+    async fn instances(&self, ctx: &Context<'_>) -> Result<Vec<Instance>> {
+        Ok(InstanceData::list_all(&get_conn_from_ctx(ctx))?
+            .iter()
+            .map(|p| p.into())
+            .collect())
     }
 }
 

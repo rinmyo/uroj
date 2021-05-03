@@ -1,5 +1,5 @@
-use crate::raw_station::RawStation;
 use crate::{get_conn_from_ctx, get_instance_pool_from_ctx};
+use crate::{instance::next_route_node, raw_station::RawStation};
 use crate::{
     instance::{
         exam::QuestionsData,
@@ -174,20 +174,25 @@ impl Mutation {
         let topo = instance.topo.clone();
 
         let arc_train = fsm.spawn_train(at).await;
-        let next_node = instance
-            .next_route_node(at, &RawDirection::Left)
-            .await
-            .or(instance.next_route_node(at, &RawDirection::Right).await);
 
         let arc_fsm = instance.fsm.clone();
         let sender = instance.tx.clone();
         tokio::spawn(async move {
             loop {
-                if let Some(node) = next_node {
-                    let fsm = arc_fsm.lock().await;
+                let fsm = &arc_fsm.lock().await;
+                let next_node = next_route_node(&fsm, &topo, at, &RawDirection::Left)
+                    .await
+                    .map(|n| (n, RawDirection::Left))
+                    .or(next_route_node(&fsm, &topo, at, &RawDirection::Right)
+                        .await
+                        .map(|n| (n, RawDirection::Right)));
+
+                if let Some((node, dir)) = next_node {
                     let mut train = arc_train.lock().await;
-                    train.try_next_step(node, &fsm, &topo, &sender).await;
+                    train.try_next_step(node, dir, &fsm, &topo, &sender).await;
                     sleep(Duration::from_millis(1)).await;
+                } else {
+                    break; //找不到次一个结点则返回
                 };
             }
         });

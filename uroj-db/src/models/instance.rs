@@ -26,6 +26,10 @@ impl Instance {
         instances.find(uid).first(conn)
     }
 
+    pub fn list_all(conn: &PgConnection) -> QueryResult<Vec<Self>> {
+        instances.load(conn)
+    }
+
     pub fn update_state(&self, new_state: String, conn: &PgConnection) -> QueryResult<()> {
         diesel::update(self)
             .set(curr_state.eq(new_state))

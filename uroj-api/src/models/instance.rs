@@ -1,12 +1,18 @@
 use async_graphql::*;
 use chrono::NaiveDateTime;
 use uroj_db::models::instance::Instance as InstanceData;
+use uroj_db::models::station::Station as StationData;
 
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use strum_macros::*;
 
+use crate::get_conn_from_ctx;
+
+use super::station::Station;
+
 #[derive(SimpleObject)]
+#[graphql(complex)]
 pub struct Instance {
     pub id: String,
     pub title: String,
@@ -14,11 +20,21 @@ pub struct Instance {
     pub created_at: NaiveDateTime,
     pub creator: Option<String>,
     pub player: String,
-    pub station: i32,
+    pub station_id: i32,
     pub curr_state: InstanceStatus,
     pub begin_at: NaiveDateTime,
     pub executor_id: i32,
     pub token: String, //给别人以访问
+}
+
+
+#[ComplexObject]
+impl Instance {
+    async fn station(&self, ctx: &Context<'_>) -> Station {
+        let data = &StationData::find(self.station_id, &get_conn_from_ctx(ctx))
+            .expect("cannot query stations");
+        data.into()
+    }
 }
 
 impl From<&InstanceData> for Instance {
@@ -30,7 +46,7 @@ impl From<&InstanceData> for Instance {
             created_at: data.created_at,
             creator: data.creator_id.clone(),
             player: data.player_id.clone(),
-            station: data.station_id,
+            station_id: data.station_id,
             curr_state: InstanceStatus::from_str(&data.curr_state)
                 .expect(&format!("cannot convert {} to Status", &data.curr_state)),
             begin_at: data.begin_at,

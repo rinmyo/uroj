@@ -264,6 +264,7 @@ pub(crate) struct MoveTrain {
     pub(crate) id: usize,
     pub(crate) node_id: NodeID,
     pub(crate) process: f64,
+    pub(crate) dir: RawDirection,
 }
 
 type TrainID = usize;
@@ -292,26 +293,23 @@ impl Train {
 
     //when node state is changed, call me
     pub(crate) async fn can_move_to(&self, target: NodeID, topo: &Topo, fsm: &InstanceFSM) -> bool {
-        if self.process < 1. {
-            return false; //必须大于1才能进入下一个移动
-        }
         let curr = self.curr_node();
         //鄰接保證物理上車可以移動
-        //行车方向
+        //行车方向, 这是边，没有则不邻接，物理上不可移动
         let dir = topo.direction(curr, target);
         if let None = dir {
             return false;
         }
-        //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
 
+        //若沒有防護信號機則無約束，若有則檢查點亮的信號是否允許進入
         let target_node = fsm.node(target).await;
         let pro_sgn_id = match dir.unwrap() {
             RawDirection::Left => target_node.right_sgn_id.as_ref(),
             RawDirection::Right => target_node.left_sgn_id.as_ref(),
         };
 
-        for s in pro_sgn_id {
-            if !fsm.sgn(&s).await.is_allowed() {
+        if let Some(s) = pro_sgn_id {
+            if !fsm.sgn(s).await.is_allowed() {
                 return false;
             }
         }
@@ -339,23 +337,26 @@ impl Train {
     pub(crate) async fn try_next_step(
         &mut self,
         target: NodeID,
+        dir: RawDirection,
         fsm: &InstanceFSM,
         topo: &Topo,
         sender: &Sender<GameFrame>,
     ) {
-        let old = self.process;
-        self.process += 0.001;
-        if self.can_move_to(target, topo, fsm).await {
+        if self.process < 1. {
+            self.process += 0.001;
+        } else if self.can_move_to(target, topo, fsm).await {
             self.move_to(target, fsm).await;
-        }
-        if old == self.process {
+        } else {
             return;
         }
+
         GameFrame::MoveTrain(MoveTrain {
             id: self.id,
             node_id: target,
             process: self.process,
+            dir: dir,
         })
-        .send_via(sender);
+        .send_via(sender)
+        .await;
     }
 }

@@ -6,10 +6,13 @@ pub(crate) mod topo;
 use async_graphql::*;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use strum_macros::*;
-use tokio::{sync::{
-    broadcast::{self, Receiver, Sender},
-    Mutex,
-}, time::sleep};
+use tokio::{
+    sync::{
+        broadcast::{self, Receiver, Sender},
+        Mutex,
+    },
+    time::sleep,
+};
 
 use serde::{Deserialize, Serialize};
 use uroj_db::models::question::Question as QuestionModel;
@@ -365,30 +368,34 @@ impl Instance {
         dir: &RawDirection,
     ) -> Option<Vec<NodeID>> {
         let fsm = &self.fsm.lock().await;
+        let topo = &self.topo;
         let curr = fsm.node(nid).await;
         if !curr.is_lock || curr.state != NodeStatus::Vacant {
             return None;
         }
         let mut res = vec![nid];
-        while let Some(next) = self.next_route_node(*res.last().unwrap(), dir).await {
+        while let Some(next) = next_route_node(fsm, topo, *res.last().unwrap(), dir).await {
             res.push(next);
         }
         Some(res)
     }
+}
 
-    pub(crate) async fn next_route_node(&self, start_node: NodeID, dir: &RawDirection) -> Option<NodeID> {
-        let topo = &self.topo;
-        let fsm = self.fsm.lock().await;
-        let edges = topo.r_graph.edges(start_node);
+pub(crate) async fn next_route_node(
+    fsm: &InstanceFSM,
+    topo: &Topo,
+    start_node: NodeID,
+    dir: &RawDirection,
+) -> Option<NodeID> {
+    let edges = topo.r_graph.edges(start_node);
 
-        for (_, t, d) in edges {
-            let to = fsm.node(t).await;
-            if d == dir && to.is_lock && to.state == NodeStatus::Vacant {
-                return Some(t);
-            }
+    for (_, t, d) in edges {
+        let to = fsm.node(t).await;
+        if d == dir && to.is_lock && to.state == NodeStatus::Vacant {
+            return Some(t);
         }
-        None
     }
+    None
 }
 
 #[derive(Deserialize, Serialize, Debug)]
