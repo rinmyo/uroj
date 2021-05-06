@@ -2,7 +2,7 @@ use crate::get_conn_from_ctx;
 
 use super::user::User;
 use async_graphql::*;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, TimeZone};
 use uroj_db::models::station::Station as StationData;
 use uroj_db::{models::user::User as UserData};
 
@@ -12,8 +12,8 @@ pub(crate) struct Station {
     id: i32,
     title: String,
     description: Option<String>,
-    created: NaiveDateTime,
-    updated: NaiveDateTime,
+    created: DateTime<Local>,
+    updated: DateTime<Local>,
     draft: bool,
     author_id: Option<String>,
     yaml: String,
@@ -35,8 +35,8 @@ impl From<&StationData> for Station {
             id: station.id,
             title: station.title.clone(),
             description: station.description.clone(),
-            created: station.created_at,
-            updated: station.updated_at,
+            created: Local.from_utc_datetime(&station.created_at),
+            updated: Local.from_utc_datetime(&station.updated_at),
             draft: station.draft,
             author_id: station.author_id.clone(),
             yaml: station.yaml.clone(),

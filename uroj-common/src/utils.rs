@@ -28,7 +28,7 @@ pub enum Role {
 }
 
 pub fn create_token(username: String, role: Role) -> String {
-    let exp_time = Local::now() + Duration::minutes(60);
+    let exp_time = Local::now() + Duration::hours(24);
 
     let claims = Claims {
         sub: username,

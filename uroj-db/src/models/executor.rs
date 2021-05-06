@@ -29,9 +29,9 @@ pub struct NewExecutor {
 }
 
 impl NewExecutor {
-    pub fn create(executor: &Self, conn: &PgConnection) -> QueryResult<Executor> {
+    pub fn create(&self, conn: &PgConnection) -> QueryResult<Executor> {
         diesel::insert_into(executors::table)
-            .values(executor)
+            .values(self)
             .get_result(conn)
     }
 }

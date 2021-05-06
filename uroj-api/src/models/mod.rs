@@ -7,6 +7,7 @@ use async_graphql::{EmptySubscription, Error, Schema};
 use uroj_common::utils::{Claims, Role as AuthRole};
 use uroj_db::connection::PgPool;
 use uroj_db::models::class::Class as ClassData;
+use uroj_db::models::executor::{Executor as ExecutorData, NewExecutor as NewExecutorData};
 use uroj_db::models::instance::{Instance as InstanceData, NewInstance as NewInstanceData};
 use uroj_db::models::station::{NewStation as NewStationData, Station as StationData};
 use uroj_db::models::user::User as UserData;
@@ -20,6 +21,7 @@ use uuid::Uuid;
 use crate::{get_conn_from_ctx, get_random_token};
 
 use self::{
+    executor::Executor,
     instance::{Instance, InstanceInput, InstanceStatus},
     station::StationInput,
 };
@@ -39,6 +41,14 @@ impl Query {
     #[graphql(guard(RoleGuard(role = "AuthRole::Admin")))]
     async fn classes(&self, ctx: &Context<'_>) -> Result<Vec<Class>> {
         Ok(ClassData::list_all(&get_conn_from_ctx(ctx))?
+            .iter()
+            .map(|c| c.into())
+            .collect())
+    }
+
+    #[graphql(guard(LoginGaurd()))]
+    async fn executors(&self, ctx: &Context<'_>) -> Result<Vec<Executor>> {
+        Ok(ExecutorData::list_all(&get_conn_from_ctx(ctx))?
             .iter()
             .map(|c| c.into())
             .collect())
@@ -114,6 +124,14 @@ impl Mutation {
 
         let created_station = &new_station.create(&conn)?;
         Ok(created_station.into())
+    }
+
+    #[graphql(guard(RoleGuard(role = "AuthRole::Admin")))]
+    async fn create_executor(&self, ctx: &Context<'_>, url: String) -> Result<Executor> {
+        let conn = get_conn_from_ctx(ctx);
+        let new_executor = NewExecutorData { addr: url };
+        let created_executor = &new_executor.create(&conn)?;
+        Ok(created_executor.into())
     }
 
     async fn create_instance(&self, ctx: &Context<'_>, input: InstanceInput) -> Result<Instance> {
@@ -193,6 +211,7 @@ impl Loader<String> for UserLoader {
 }
 
 pub mod class;
+pub mod executor;
 pub mod instance;
 pub mod station;
 pub mod user;

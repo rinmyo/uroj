@@ -1,5 +1,6 @@
 use async_graphql::*;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, TimeZone};
+use uroj_db::models::executor::Executor as ExecutorData;
 use uroj_db::models::instance::Instance as InstanceData;
 use uroj_db::models::station::Station as StationData;
 
@@ -9,7 +10,7 @@ use strum_macros::*;
 
 use crate::get_conn_from_ctx;
 
-use super::station::Station;
+use super::{executor::Executor, station::Station};
 
 #[derive(SimpleObject)]
 #[graphql(complex)]
@@ -17,22 +18,27 @@ pub struct Instance {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
-    pub created_at: NaiveDateTime,
+    pub created_at: DateTime<Local>,
     pub creator: Option<String>,
     pub player: String,
     pub station_id: i32,
     pub curr_state: InstanceStatus,
-    pub begin_at: NaiveDateTime,
+    pub begin_at: DateTime<Local>,
     pub executor_id: i32,
     pub token: String, //给别人以访问
 }
-
 
 #[ComplexObject]
 impl Instance {
     async fn station(&self, ctx: &Context<'_>) -> Station {
         let data = &StationData::find(self.station_id, &get_conn_from_ctx(ctx))
             .expect("cannot query stations");
+        data.into()
+    }
+
+    async fn executor(&self, ctx: &Context<'_>) -> Executor {
+        let data = &ExecutorData::find_one(self.executor_id, &get_conn_from_ctx(ctx))
+            .expect("cannot query executor");
         data.into()
     }
 }
@@ -43,13 +49,13 @@ impl From<&InstanceData> for Instance {
             id: data.id.to_string(),
             title: data.title.clone(),
             description: data.description.clone(),
-            created_at: data.created_at,
+            created_at: Local.from_utc_datetime(&data.created_at),
             creator: data.creator_id.clone(),
             player: data.player_id.clone(),
             station_id: data.station_id,
             curr_state: InstanceStatus::from_str(&data.curr_state)
                 .expect(&format!("cannot convert {} to Status", &data.curr_state)),
-            begin_at: data.begin_at,
+            begin_at: Local.from_utc_datetime(&data.begin_at),
             executor_id: data.executor_id,
             token: data.token.clone(),
         }

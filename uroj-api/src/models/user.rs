@@ -4,7 +4,7 @@ use async_graphql::*;
 
 use serde::{Deserialize, Serialize};
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 
 use strum_macros::*;
 
@@ -24,8 +24,8 @@ pub struct User {
     class_id: Option<i32>,
     role: Role,
     is_active: bool,
-    date_joined: NaiveDateTime,
-    last_login: Option<NaiveDateTime>,
+    date_joined: DateTime<Local>,
+    last_login: Option<DateTime<Local>>,
 }
 
 #[ComplexObject]
@@ -58,8 +58,8 @@ impl From<&UserData> for User {
             email: user.email.clone(),
             class_id: user.class_id,
             is_active: user.is_active,
-            date_joined: user.joined_at,
-            last_login: user.last_login_at,
+            date_joined: Local.from_utc_datetime(&user.joined_at),
+            last_login: user.last_login_at.map(|u|Local.from_utc_datetime(&u)),
         }
     }
 }
