@@ -1,4 +1,7 @@
-use crate::{get_conn_from_ctx, get_instance_pool_from_ctx};
+use crate::{
+    get_conn_from_ctx, get_instance_pool_from_ctx,
+    instance::{fsm::GlobalStatus, InstanceKind},
+};
 use crate::{instance::next_route_node, raw_station::RawStation};
 use crate::{
     instance::{
@@ -13,8 +16,9 @@ use async_graphql::*;
 use async_stream::stream;
 use chrono::Utc;
 use futures::Stream;
+use log::{debug, info};
 use std::{collections::HashMap, str::FromStr, time::Duration};
-use tokio::time::sleep;
+use tokio::time::delay_for;
 use uroj_db::models::instance::Instance as InstanceModel;
 
 use uuid::Uuid;
@@ -35,6 +39,27 @@ impl Query {
         let instance = pool.get(&id).ok_or("no instance found")?;
         let data = instance.exam.as_ref().ok_or("not exam instance!")?;
         Ok(data.get_questions())
+    }
+
+    async fn instance_type(&self, ctx: &Context<'_>, id: String) -> Result<InstanceKind> {
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
+
+        Ok(match instance.exam {
+            Some(_) => InstanceKind::Exam,
+            None => InstanceKind::Exercise,
+        })
+    }
+
+    async fn global_status(&self, ctx: &Context<'_>, id: String) -> Result<GlobalStatus> {
+        let pool = get_instance_pool_from_ctx(ctx).await;
+        let instance = pool.get(&id).ok_or("no instance found")?;
+        let fsm = instance.fsm.lock().await;
+        Ok(fsm.get_global_status().await)
+    }
+
+    async fn ping(&self) -> String {
+        "pong".to_string()
     }
 }
 
@@ -63,7 +88,7 @@ impl Mutation {
             title: data.title.clone(),
             player: data.player_id.clone(),
             token: data.token.clone(),
-            station: RawStation::from_yaml(&station_yaml)?,
+            station: RawStation::from_json(&station_yaml)?,
             questions: questions,
         };
 
@@ -74,22 +99,26 @@ impl Mutation {
         let instance = Instance::new(&cfg)?;
         pool.insert(cfg.id.clone(), instance);
 
-        data.update_state(InstanceStatus::Playing.to_string(), &conn)?;
+        let state = InstanceStatus::Playing.to_string();
+        data.update_state(state.clone(), &conn)?;
+        info!("running instance: {}", cfg.id.clone());
 
-        Ok(cfg.id)
+        Ok(state)
     }
 
     //结束
     async fn stop(&self, ctx: &Context<'_>, id: String) -> Result<String> {
         let mut instances = get_instance_pool_from_ctx(ctx).await;
-        let ins = instances
+        instances
             .remove(&id)
             .ok_or(format!("not found instance {}", id))?;
         let uuid = Uuid::from_str(&id)?;
         let conn = get_conn_from_ctx(ctx);
-        InstanceModel::find_one(uuid, &conn)?
-            .update_state(InstanceStatus::Finished.to_string(), &conn)?;
-        Ok(id)
+        let state = InstanceStatus::Finished.to_string();
+        InstanceModel::find_one(uuid, &conn)?.update_state(state.clone(), &conn)?;
+
+        info!("shut instance {} down", id.clone());
+        Ok(state)
     }
 
     //創建進路
@@ -99,6 +128,7 @@ impl Mutation {
         id: String,
         input: CreateRouteInput,
     ) -> Result<String> {
+        debug!("request for creating route");
         let pool = get_instance_pool_from_ctx(ctx).await;
         let instance = pool.get(&id).ok_or("no instance found")?;
 
@@ -115,7 +145,8 @@ impl Mutation {
             },
         };
 
-        instance.create_path(start, end).await?;
+        let path = instance.create_path(start, end).await?;
+        info!("new route {:?} in instance {}", path, id.clone());
 
         Ok(id)
     }
@@ -178,19 +209,19 @@ impl Mutation {
         let arc_fsm = instance.fsm.clone();
         let sender = instance.tx.clone();
         tokio::spawn(async move {
+            let mut train = arc_train.lock().await;
             loop {
                 let fsm = &arc_fsm.lock().await;
-                let next_node = next_route_node(&fsm, &topo, at, &RawDirection::Left)
+                let next_node = next_route_node(&fsm, &topo, &train.past_node, &RawDirection::Left)
                     .await
                     .map(|n| (n, RawDirection::Left))
-                    .or(next_route_node(&fsm, &topo, at, &RawDirection::Right)
+                    .or(next_route_node(&fsm, &topo, &train.past_node, &RawDirection::Right)
                         .await
                         .map(|n| (n, RawDirection::Right)));
 
                 if let Some((node, dir)) = next_node {
-                    let mut train = arc_train.lock().await;
                     train.try_next_step(node, dir, &fsm, &topo, &sender).await;
-                    sleep(Duration::from_millis(1)).await;
+                    delay_for(Duration::from_millis(1)).await;
                 } else {
                     break; //找不到次一个结点则返回
                 };

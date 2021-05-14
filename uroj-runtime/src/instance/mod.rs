@@ -4,6 +4,7 @@ pub(crate) mod station;
 pub(crate) mod topo;
 
 use async_graphql::*;
+use log::debug;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use strum_macros::*;
 use tokio::{
@@ -11,7 +12,6 @@ use tokio::{
         broadcast::{self, Receiver, Sender},
         Mutex,
     },
-    time::sleep,
 };
 
 use serde::{Deserialize, Serialize};
@@ -150,10 +150,14 @@ impl Instance {
         start: PathBtn,
         end: PathBtn,
     ) -> Result<Vec<NodeID>, String> {
+        debug!("flag0");
+        if start.id == end.id {
+            return Err("start and end cannot be same".to_string());
+        }
         let topo = &self.topo;
         let fsm = &self.fsm.lock().await;
 
-        let start_sgn = fsm.sgn(&start.id).await;
+        let mut start_sgn = fsm.sgn(&start.id).await;
 
         let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.dir.reverse());
         //這裏的方向是根據用戶輸入判斷的朝向，和最終尋到的路徑的前後朝向做判斷
@@ -245,12 +249,17 @@ impl Instance {
 
         //ensure that all nodes are not used or locked by another existing path
         let mut sgn_id = Vec::new();
-        for node in &maybe_path {
-            let node = fsm.node(*node).await;
+        debug!("flag1");
+        for id in &maybe_path {
+            debug!("flag1-{}", id);
+
+            let node = fsm.node(*id).await;
             if node.state != NodeStatus::Vacant {
+                debug!("{} is not vacant", id);
                 return Err("target path is not vacant".into());
             }
             if node.is_lock {
+                debug!("{} is not locked", id);
                 return Err("target path is conflicting".into());
             }
             if node.used_count > 0 {
@@ -267,38 +276,39 @@ impl Instance {
         }
 
         //锁闭区段
+        debug!("flag2");
         for id in &maybe_path {
+            debug!("flag2-{}", id);
+
             let mut node = fsm.node(*id).await;
+            debug!("trying to lock: {}", id);
             node.lock(&self.tx).await;
             node.once_occ = false; //重置曾占用flag
             for id in topo.s_graph.neighbors(*id) {
                 let mut node = fsm.node(id).await;
                 node.used_count += 1;
+                debug!("{}.used_count= {}", id, node.used_count);
             }
-        }
-
-        //開放長調車進路途經信號機
-
-        let tx = &self.tx;
-        let mut start_sgn = fsm.sgn(&start.id).await;
-
-        if is_pass {
-            start_sgn.open_pass(tx).await;
-        }
-
-        if is_send {
-            start_sgn.open_send(tx).await;
         }
 
         if is_recv {
             let kind = fsm.node(goal_node).await.kind.clone();
-            start_sgn.open_recv(kind, tx).await;
+            start_sgn.open_recv(kind, &self.tx).await;
+        }
+
+        if is_pass || is_send {
+            start_sgn.open(&self.tx).await;
         }
 
         if is_shnt {
+            start_sgn.open(&self.tx).await;
+
             for id in sgn_id {
+                if id == start_sgn.id {
+                    continue;
+                }
                 let mut sgn = fsm.sgn(&id).await;
-                sgn.open_shnt(tx).await;
+                sgn.open(&self.tx).await;
             }
         }
 
@@ -308,6 +318,7 @@ impl Instance {
     //進路を消す
     pub(crate) async fn cancel_path(&self, start: PathBtn) -> Result<(), String> {
         let fsm = &self.fsm.lock().await;
+        let topo = &self.topo;
 
         let mut start_sgn = fsm.sgn(&start.id).await;
         if !start_sgn.is_allowed() {
@@ -316,12 +327,15 @@ impl Instance {
 
         let (start_node, start_dir) = (start_sgn.protect_node_id, start_sgn.dir.reverse());
 
-        let maybe_route = self
-            .find_a_route(start_node, &start_dir)
+        debug!("开始寻径");
+        let maybe_route = Self::find_a_route(fsm, topo, start_node, &start_dir)
             .await
             .ok_or("not find a existed route")?;
+        debug!("寻得: {:?}", maybe_route.clone());
 
         let close_node = fsm.node(start_sgn.toward_node_id).await;
+        debug!("接近区段: {}", close_node.node_id);
+
         if close_node.state != NodeStatus::Vacant {
             return Err("approching node is not vacant".into());
         }
@@ -339,8 +353,8 @@ impl Instance {
             node.unlock(&self.tx).await;
 
             let sgn_id = match start_dir {
-                RawDirection::Left => fsm.node(n).await.right_sgn_id.clone(),
-                RawDirection::Right => fsm.node(n).await.left_sgn_id.clone(),
+                RawDirection::Left => node.right_sgn_id.clone(),
+                RawDirection::Right => node.left_sgn_id.clone(),
             };
 
             for id in self.topo.s_graph.neighbors(n) {
@@ -350,6 +364,9 @@ impl Instance {
 
             //調車進路鎖閉所有調車信號機
             if let Some(sgn_id) = sgn_id {
+                if sgn_id == start.id {
+                    continue;
+                }
                 let mut sgn = fsm.sgn(&sgn_id).await;
                 if sgn.kind == RawSignalKind::ShuntingSignal {
                     sgn.protect(&self.tx).await;
@@ -357,24 +374,21 @@ impl Instance {
             }
         }
 
-        //列車進路解鎖始端信號機
-
         Ok(())
     }
 
     pub(crate) async fn find_a_route(
-        &self,
+        fsm: &InstanceFSM,
+        topo: &Topo,
         nid: NodeID,
         dir: &RawDirection,
     ) -> Option<Vec<NodeID>> {
-        let fsm = &self.fsm.lock().await;
-        let topo = &self.topo;
         let curr = fsm.node(nid).await;
         if !curr.is_lock || curr.state != NodeStatus::Vacant {
             return None;
         }
         let mut res = vec![nid];
-        while let Some(next) = next_route_node(fsm, topo, *res.last().unwrap(), dir).await {
+        while let Some(next) = next_route_node(fsm, topo, &res, dir).await {
             res.push(next);
         }
         Some(res)
@@ -384,15 +398,17 @@ impl Instance {
 pub(crate) async fn next_route_node(
     fsm: &InstanceFSM,
     topo: &Topo,
-    start_node: NodeID,
+    his: &Vec<NodeID>,
     dir: &RawDirection,
 ) -> Option<NodeID> {
-    let edges = topo.r_graph.edges(start_node);
+    let edges = topo.r_graph.edges(*his.last().unwrap());
 
     for (_, t, d) in edges {
-        let to = fsm.node(t).await;
-        if d == dir && to.is_lock && to.state == NodeStatus::Vacant {
-            return Some(t);
+        if d == dir && !his.contains(&t) {
+            let to = fsm.node(t).await;
+            if to.is_lock && to.state == NodeStatus::Vacant {
+                return Some(t);
+            }
         }
     }
     None
@@ -408,15 +424,16 @@ pub(crate) struct InstanceConfig {
     pub(crate) token: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub(crate) enum InstanceData {
-    Exam { exam_id: String },
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Deserialize, Serialize, Debug)]
+pub(crate) enum InstanceKind {
+    Exam,
     Chain,
     Exercise,
 }
 
-#[derive(Eq, PartialEq, Display, EnumString)]
+#[derive(Eq, PartialEq, Display, EnumString, Deserialize, Serialize, Enum, Copy, Clone)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum InstanceStatus {
     Prestart, //启动前
     Playing,  //使用中

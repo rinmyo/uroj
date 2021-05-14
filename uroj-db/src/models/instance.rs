@@ -30,12 +30,12 @@ impl Instance {
         instances.load(conn)
     }
 
-    pub fn update_state(&self, new_state: String, conn: &PgConnection) -> QueryResult<()> {
+    pub fn update_state(&self, new_state: String, conn: &PgConnection) -> QueryResult<String> {
         diesel::update(self)
-            .set(curr_state.eq(new_state))
+            .set(curr_state.eq(new_state.clone()))
             .execute(conn)?;
 
-        Ok(())
+        Ok(new_state)
     }
 
     pub fn get_scores(&self, conn: &PgConnection) -> QueryResult<Vec<InstanceQuestion>> {

@@ -7,6 +7,7 @@ use uroj_runtime::{configure_service, create_schema_with_context, InstancePool};
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
+    env_logger::init();
 
     let ins_pool = InstancePool::new();
     let db_pool = create_connection_pool();

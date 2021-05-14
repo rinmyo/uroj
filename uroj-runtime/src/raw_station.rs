@@ -49,7 +49,6 @@ impl Direction {
     }
 }
 
-
 #[derive(Deserialize, Serialize, Debug)]
 pub(crate) struct Signal {
     pub(crate) id: String,
@@ -67,6 +66,7 @@ pub(crate) struct Signal {
 
 #[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Debug, Display, EnumString)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum JointKind {
     Normal,    //普通
     Clearance, //侵限绝缘
@@ -114,8 +114,8 @@ pub(crate) struct Station {
 }
 
 impl Station {
-    pub(crate) fn from_yaml(yaml: &str) -> serde_yaml::Result<Self> {
-        serde_yaml::from_str(yaml)
+    pub(crate) fn from_json(yaml: &str) -> serde_json::Result<Self> {
+        serde_json::from_str(yaml)
     }
 }
 
@@ -129,7 +129,6 @@ pub(crate) type RawJointKind = JointKind;
 pub(crate) type RawNodeKind = NodeKind;
 pub(crate) type RawNodeSide = NodeSide;
 pub(crate) type RawDirection = Direction;
-
 
 #[cfg(test)]
 mod tests {
