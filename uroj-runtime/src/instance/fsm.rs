@@ -10,7 +10,7 @@ use tokio::{
     time::delay_for,
 };
 
-use super::{topo::Topo, FrameSender, GameFrame, Instance};
+use super::{topo::Topo, FrameSender, GameFrame};
 
 //實例狀態機
 pub(crate) struct InstanceFSM {
@@ -38,12 +38,17 @@ impl InstanceFSM {
             .await
     }
 
-    pub(crate) async fn spawn_train(&mut self, node: NodeID) -> Arc<Mutex<Train>> {
+    pub(crate) async fn spawn_train(
+        &mut self,
+        node: NodeID,
+        sender: &FrameSender,
+    ) -> Arc<Mutex<Train>> {
         let mut trains = self.trains.lock().await;
         let id = trains.len() + 1;
-        let new_train = Arc::new(Train::new(node, id));
-        let cloned_train = new_train.clone();
-        trains.push(new_train);
+        let new_train = Train::new(node, id, sender).await;
+        let arc_train = Arc::new(new_train);
+        let cloned_train = arc_train.clone();
+        trains.push(arc_train);
         cloned_train
     }
 
@@ -302,19 +307,38 @@ type TrainID = usize;
 pub(crate) struct Train {
     pub(crate) id: TrainID,
     process: f64,
+    dir: RawDirection,
     pub(crate) past_node: Vec<NodeID>,
 }
 
 impl Train {
-    pub(crate) fn new(spawn_at: NodeID, id: TrainID) -> Mutex<Self> {
+    pub(crate) async fn new(spawn_at: NodeID, id: TrainID, sender: &FrameSender) -> Mutex<Self> {
         let train = Train {
             id: id,
             process: 0.5,
             past_node: vec![spawn_at],
+            dir: RawDirection::Left,
         };
 
+        train.send_states(sender).await;
         let arc_train = Mutex::new(train);
         arc_train
+    }
+
+    pub(crate) fn turn_direction(&mut self, dir: RawDirection) {
+        self.dir = dir;
+        self.process = 1. - self.process;
+    }
+
+    pub(crate) async fn send_states(&self, sender: &FrameSender) {
+        GameFrame::MoveTrain(MoveTrain {
+            id: self.id,
+            node_id: self.curr_node(),
+            process: self.process,
+            dir: self.dir,
+        })
+        .send_via(sender)
+        .await;
     }
 
     pub(crate) fn curr_node(&self) -> NodeID {
@@ -347,7 +371,7 @@ impl Train {
         true
     }
 
-    async fn move_to(&mut self, target: NodeID, fsm: &InstanceFSM, sender: &Sender<GameFrame>) {
+    async fn move_to(&mut self, target: NodeID, fsm: &InstanceFSM) {
         let from = self.curr_node();
         debug!("train move to {}", target);
 
@@ -368,7 +392,6 @@ impl Train {
     pub(crate) async fn try_next_step(
         &mut self,
         target: NodeID,
-        dir: RawDirection,
         fsm: &InstanceFSM,
         topo: &Topo,
         sender: &Sender<GameFrame>,
@@ -378,18 +401,11 @@ impl Train {
             self.process += 1. / tgt_node.len;
         } else if self.can_move_to(target, topo, fsm).await {
             debug!("test move to {}", target);
-            self.move_to(target, fsm, sender).await;
+            self.move_to(target, fsm).await;
         } else {
             return;
         }
 
-        GameFrame::MoveTrain(MoveTrain {
-            id: self.id,
-            node_id: self.curr_node(),
-            process: self.process,
-            dir: dir,
-        })
-        .send_via(sender)
-        .await;
+        self.send_states(sender).await;
     }
 }

@@ -204,10 +204,10 @@ impl Mutation {
         let mut fsm = instance.fsm.lock().await;
         let topo = instance.topo.clone();
 
-        let arc_train = fsm.spawn_train(at).await;
-
         let arc_fsm = instance.fsm.clone();
         let sender = instance.tx.clone();
+        let arc_train = fsm.spawn_train(at, &sender).await;
+
         tokio::spawn(async move {
             let mut train = arc_train.lock().await;
             loop {
@@ -215,12 +215,15 @@ impl Mutation {
                 let next_node = next_route_node(&fsm, &topo, &train.past_node, &RawDirection::Left)
                     .await
                     .map(|n| (n, RawDirection::Left))
-                    .or(next_route_node(&fsm, &topo, &train.past_node, &RawDirection::Right)
-                        .await
-                        .map(|n| (n, RawDirection::Right)));
+                    .or(
+                        next_route_node(&fsm, &topo, &train.past_node, &RawDirection::Right)
+                            .await
+                            .map(|n| (n, RawDirection::Right)),
+                    );
 
                 if let Some((node, dir)) = next_node {
-                    train.try_next_step(node, dir, &fsm, &topo, &sender).await;
+                    train.turn_direction(dir);
+                    train.try_next_step(node, &fsm, &topo, &sender).await;
                     delay_for(Duration::from_millis(1)).await;
                 } else {
                     break; //找不到次一个结点则返回
