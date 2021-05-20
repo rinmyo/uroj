@@ -4,7 +4,7 @@ use async_graphql::*;
 
 use serde::{Deserialize, Serialize};
 
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Local, TimeZone};
 
 use strum_macros::*;
 
